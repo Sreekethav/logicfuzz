@@ -93,6 +93,8 @@ def clone_oss_fuzz(oss_fuzz_dir: str = ''):
     for proj in os.listdir(src_projects):
       src_project = os.path.join(src_projects, proj)
       dst_project = os.path.join(OSS_FUZZ_DIR, 'projects', proj)
+      if os.path.exists(dst_project):
+        shutil.rmtree(dst_project)
       logger.info('Copying: %s to %s', src_project, dst_project)
       shutil.copytree(src_project, dst_project)
 

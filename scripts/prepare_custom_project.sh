@@ -40,8 +40,8 @@ echo "=== Preparing $PROJECT for LogicFuzz ==="
 # Step 1: Build and run introspector
 cd "$OSS_FUZZ_DIR"
 echo "[1/2] Building project and running introspector..."
-python3 infra/helper.py build_image "$PROJECT"
-python3 infra/helper.py introspector "$PROJECT"
+echo "n" | python3 infra/helper.py build_image "$PROJECT"
+echo "n" | python3 infra/helper.py introspector "$PROJECT"
 
 # Step 2: Copy FI data
 echo "[2/2] Setting up FI database..."
