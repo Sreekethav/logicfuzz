@@ -523,7 +523,7 @@ Manually create `conti-benchmark/my-private-project.yaml`:
 
 ## 📁 Method 4: Using data-dir Workflow (Recommended for Custom Projects)
 
-For projects **not in the upstream OSS-Fuzz repository**, LogicFuzz provides a special "data-dir" workflow that allows you to use your own OSS-Fuzz clone with custom projects.
+For projects **not in the upstream OSS-Fuzz repository**, use this workflow to prepare your project, then run LogicFuzz normally.
 
 ### When to Use This Method
 
@@ -535,55 +535,57 @@ For projects **not in the upstream OSS-Fuzz repository**, LogicFuzz provides a s
 
 ### Prerequisites
 
-**Do I need Dockerfile and build.sh?** Yes, but you have options:
-
-1. **Auto-generate them first** (if you have a GitHub repo):
-   - Use [Method 2](#method-2-automated-build-generation) to auto-generate Dockerfile, build.sh, and project.yaml
-   - Then proceed with Step 1 below
-
-2. **Manually create them** (if you have private/local code):
-   - Use [Method 1](#method-1-manual-setup) to create Dockerfile, build.sh, and project.yaml
-   - Then proceed with Step 1 below
-
-3. **Already have them**:
-   - If you already have these files, skip to Step 1
-
-You also need:
-- ✅ **Benchmark YAML file** (`conti-benchmark/my-project.yaml`) with function signatures
+You need Dockerfile, build.sh, and project.yaml for your project:
+1. **Auto-generate** (if you have a GitHub repo): Use [Method 2](#-method-2-automated-build-generation-recommended) first
+2. **Manual create** (for private/local code): Use [Method 1](#-method-1-manual-setup) first
+3. **Already have them**: Proceed to Step 1
 
 ### Step 1: Prepare data-dir Structure
 
 ```bash
-# Create data-dir directory structure
-cd /path/to/logic-fuzz
+cd /path/to/logicfuzz
+
+# Create directory structure
 mkdir -p data-dir/oss-fuzz2/projects
-mkdir -p data-dir/fuzz_introspector_db  # Optional but recommended
-```
+mkdir -p data-dir/fuzz_introspector_db
 
-### Step 2: Set Up Your Custom OSS-Fuzz Clone
-
-```bash
-# Option A: Clone a fresh OSS-Fuzz and add your project
+# Clone OSS-Fuzz infrastructure
 git clone --depth 1 https://github.com/gejingquan/oss-fuzz data-dir/oss-fuzz2
-cp -r oss-fuzz/projects/my-project data-dir/oss-fuzz2/projects/
 
-# Option B: Use your existing OSS-Fuzz clone
-cp -r /path/to/your/oss-fuzz data-dir/oss-fuzz2
+# Copy your project (must have Dockerfile, build.sh, project.yaml)
+cp -r /path/to/my-project data-dir/oss-fuzz2/projects/
 ```
 
-### Step 3: Configure Your Project
-
-Ensure your project has the standard OSS-Fuzz structure:
-- `data-dir/oss-fuzz2/projects/my-project/Dockerfile`
-- `data-dir/oss-fuzz2/projects/my-project/build.sh`
-- `data-dir/oss-fuzz2/projects/my-project/project.yaml`
-
-### Step 4: Run LogicFuzz with data-dir
-
-**Option A: Using Docker (Recommended)**
+### Step 2: Generate FI Data (Required)
 
 ```bash
-# Mount data-dir when running Docker
+./scripts/prepare_custom_project.sh my-project
+```
+
+This script:
+1. Builds your project with OSS-Fuzz
+2. Runs Fuzz Introspector static analysis
+3. Copies FI data to `data-dir/fuzz_introspector_db/`
+
+> **Note**: Without this step, LogicFuzz cannot discover functions and will only generate empty drivers.
+
+### Step 3: Run LogicFuzz (Same as Regular Projects)
+
+```bash
+# Start FI server
+bash report/launch_introspector.sh --source data-dir --data-dir data-dir
+
+# Run LogicFuzz (same command as OSS-Fuzz projects)
+export OSS_FUZZ_DATA_DIR=$PWD/data-dir/oss-fuzz2
+python run_logicfuzz.py \
+  -y conti-benchmark/my-project.yaml \
+  --model gpt-5 \
+  -e http://127.0.0.1:8080/api
+```
+
+### Alternative: Using Docker
+
+```bash
 docker run --rm \
   --privileged \
   --network host \
@@ -598,58 +600,6 @@ docker run --rm \
     --model gpt-5 \
     -e http://127.0.0.1:8080/api
 ```
-
-When `/experiment/data-dir` exists, LogicFuzz automatically:
-- Sets `OSS_FUZZ_DATA_DIR` environment variable to `/experiment/data-dir/oss-fuzz2`
-- Uses projects from your custom OSS-Fuzz clone instead of the default one
-
-**Option B: Using CLI with Environment Variable**
-
-```bash
-# Set environment variable to point to your custom OSS-Fuzz
-export OSS_FUZZ_DATA_DIR=/path/to/logic-fuzz/data-dir/oss-fuzz2
-
-# Run LogicFuzz normally
-python run_logicfuzz.py \
-  -y conti-benchmark/my-project.yaml \
-  --model gpt-5 \
-  -e http://127.0.0.1:8080/api
-```
-
-### Step 5: Start Fuzz Introspector with data-dir (Optional)
-
-If you have a pre-built Fuzz Introspector database:
-
-```bash
-# Start FI server using data-dir
-bash report/launch_introspector.sh \
-  --source data-dir \
-  --data-dir data-dir
-```
-
-Or using Docker:
-
-```bash
-docker run --rm -p 8080:8080 \
-  -v "$PWD/data-dir":/opt/logicfuzz/data-dir \
-  logicfuzz-introspector \
-    --source data-dir \
-    --data-dir data-dir
-```
-
-### Key Points
-
-- **Directory Structure**: Your `data-dir` should contain:
-  - `oss-fuzz2/` - Your custom OSS-Fuzz clone with projects
-  - `fuzz_introspector_db/` - Pre-built FI database (optional)
-
-- **Automatic Detection**: When running in Docker, if `/experiment/data-dir` exists, LogicFuzz automatically switches to data-dir mode
-
-- **Environment Variable**: You can manually set `OSS_FUZZ_DATA_DIR` to override the default OSS-Fuzz location
-
-- **Project Discovery**: LogicFuzz will discover all projects in `data-dir/oss-fuzz2/projects/` automatically
-
-For more details, see [`docs/DOCKER_SETUP.md`](DOCKER_SETUP.md#4-using-the-data-dir-workflow-non-oss-fuzz-projects).
 
 ---
 
@@ -954,7 +904,7 @@ python run_logicfuzz.py \
 python run_logicfuzz.py \
   -y conti-benchmark/my-project.yaml \
   --model gpt-5 \
-  --num-samples 10
+  --num-samples 5
 ```
 
 ### 3. Iterate on Signatures
