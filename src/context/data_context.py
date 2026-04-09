@@ -654,42 +654,22 @@ class FuzzingContext:
         except Exception as e:
             log.warning(f"State Machine analysis failed (non-critical): {e}")
 
-        # === Step 5f: L4/L5 Coverage Ranking (Progressive Filter Pipeline) ===
+        # === Step 5f: L4 Coverage Ranking (Progressive Filter Pipeline) ===
         # L4: Rank sequences by diversity and entry point position
-        # L5: Coverage-aware filtering to avoid re-testing already covered code
-        log.debug('  5f/10 Ranking sequences by coverage potential (L4/L5)...')
+        # Note: L5 coverage-aware filtering removed (requires OSS-Fuzz runtime data)
+        log.debug('  5f/10 Ranking sequences by coverage potential (L4)...')
         coverage_ranking_result = {}
-
-        # Try to fetch existing coverage data for L5 filtering
-        existing_coverage = {}
-        try:
-            from data_prep import introspector
-            all_funcs = introspector.query_introspector_all_functions(project_name)
-            if all_funcs:
-                for func in all_funcs:
-                    func_name = func.get('function_name', '') or func.get('raw-function-name', '')
-                    cov = func.get('code_coverage', func.get('code-coverage', 0))
-                    if func_name and cov is not None:
-                        try:
-                            existing_coverage[func_name] = float(cov)
-                        except (ValueError, TypeError):
-                            pass
-                if existing_coverage:
-                    log.info(f'   ℹ️ Loaded existing coverage for {len(existing_coverage)} functions from FuzzIntrospector')
-        except Exception as e:
-            log.debug(f"Could not fetch existing coverage (non-critical): {e}")
 
         try:
             from liberator_adapter.constraints import select_top_k_sequences
 
-            # Rank and select top-k sequences (with optional L5 coverage-aware filtering)
+            # Rank and select top-k sequences (L4 diversity ranking)
             pre_rank_count = len(api_sequences)
             api_sequences, ranking_summary = select_top_k_sequences(
                 api_sequences,
                 entry_point_analysis=entry_point_analysis_result,
                 top_k=filter_top_k,
                 logger_instance=log,
-                existing_coverage=existing_coverage if existing_coverage else None,
             )
             coverage_ranking_result = ranking_summary
 
@@ -1067,48 +1047,52 @@ class FuzzingContext:
 
 
 def _extract_existing_fuzzer_headers(
-        project_name: str, log: logging.Logger) -> Dict[str, List[str]]:
+        project_name: str, log: logging.Logger,
+        project_dir: str = None) -> Dict[str, List[str]]:
     """
     Extract headers from existing fuzzers for reference.
 
+    Uses local search to find existing fuzz drivers and extract their headers.
     This is not critical data - if it fails, we just return empty.
+
+    Args:
+        project_name: Name of the project
+        log: Logger instance
+        project_dir: Optional path to project directory for local search
     """
-    from data_prep import introspector
     import re
 
     result = {'standard_headers': [], 'project_headers': []}
 
-    try:
-        # Get all fuzzer files
-        harness_data = introspector.query_introspector_for_harness_intrinsics(
-            project_name)
-        fuzzers = [item['source'] for item in harness_data if 'source' in item]
-        if not fuzzers:
-            return result
+    # Use local search to find existing drivers
+    local_drivers = []
+    if project_dir:
+        local_drivers = _search_local_fuzz_drivers(project_dir, log, max_drivers=5)
 
+    if not local_drivers:
+        log.debug(f'No local fuzz drivers found for header extraction')
+        return result
+
+    try:
         standard_headers = set()
         project_headers = set()
 
-        # Extract headers from first few fuzzers
-        for fuzzer_path in fuzzers[:5]:
-            try:
-                fuzzer_source = introspector.query_introspector_file_source(
-                    project_name, fuzzer_path)
-                if not fuzzer_source:
-                    continue
+        # Extract headers from found fuzz drivers
+        for driver in local_drivers:
+            fuzzer_source = driver.get('source', '')
+            if not fuzzer_source:
+                continue
 
-                # Extract #include statements from top of file
-                for line in fuzzer_source.split('\n')[:50]:
-                    include_match = re.match(
-                        r'^\s*#include\s+[<"]([^>"]+)[>"]', line)
-                    if include_match:
-                        header = include_match.group(1)
-                        if header.startswith(project_name) or '/' in header:
-                            project_headers.add(header)
-                        else:
-                            standard_headers.add(header)
-            except Exception:
-                continue  # Skip this fuzzer if extraction fails
+            # Extract #include statements from top of file
+            for line in fuzzer_source.split('\n')[:50]:
+                include_match = re.match(
+                    r'^\s*#include\s+[<"]([^>"]+)[>"]', line)
+                if include_match:
+                    header = include_match.group(1)
+                    if header.startswith(project_name) or '/' in header:
+                        project_headers.add(header)
+                    else:
+                        standard_headers.add(header)
 
         result['standard_headers'] = sorted(standard_headers)
         result['project_headers'] = sorted(project_headers)
@@ -1285,17 +1269,20 @@ def _extract_existing_driver_knowledge(project_name: str,
     """
     Extract fuzzing knowledge from existing fuzz drivers.
 
-    Search order:
-    1. Local project directory (if provided) - search for *fuzz*.c/cpp files
-    2. FuzzIntrospector API - for OSS-Fuzz projects
+    Uses local search to find existing fuzz drivers in the project directory.
+
+    Args:
+        project_name: Name of the project
+        log: Logger instance
+        llm_client: Optional LLM client for pattern analysis
+        max_drivers: Maximum number of drivers to analyze
+        project_dir: Path to project directory for local search
 
     Returns:
         Dictionary containing:
         - driver_sources: List of {'path': str, 'source': str}
         - analysis: Structured analysis with core_functionality and setup_teardown
     """
-    from data_prep import introspector
-
     result = {
         'driver_sources': [],
         'analysis': None  # Will contain structured knowledge if LLM available
@@ -1303,39 +1290,13 @@ def _extract_existing_driver_knowledge(project_name: str,
 
     driver_sources = []
 
-    # === Step 1: Try local project directory first ===
+    # Search local project directory for existing fuzz drivers
     if project_dir:
         log.info(f'   🔍 Searching for local fuzz drivers in {project_dir}...')
         local_drivers = _search_local_fuzz_drivers(project_dir, log, max_drivers)
         if local_drivers:
             driver_sources.extend(local_drivers)
             log.info(f'   ✅ Found {len(local_drivers)} local fuzz drivers')
-
-    # === Step 2: Try FuzzIntrospector API if needed ===
-    if len(driver_sources) < max_drivers:
-        remaining = max_drivers - len(driver_sources)
-        try:
-            log.info(f'   🔍 Querying FuzzIntrospector for existing fuzzers...')
-            harness_data = introspector.query_introspector_for_harness_intrinsics(
-                project_name)
-            fuzzers = [item['source'] for item in harness_data if 'source' in item]
-
-            if fuzzers:
-                log.info(f'   Found {len(fuzzers)} fuzzers via FuzzIntrospector')
-
-                for fuzzer_path in fuzzers[:remaining]:
-                    try:
-                        fuzzer_source = introspector.query_introspector_file_source(
-                            project_name, fuzzer_path)
-                        if fuzzer_source:
-                            driver_sources.append({
-                                'path': fuzzer_path,
-                                'source': fuzzer_source
-                            })
-                    except Exception as e:
-                        log.debug(f'Failed to fetch source for {fuzzer_path}: {e}')
-        except Exception as e:
-            log.debug(f'FuzzIntrospector query failed (non-critical): {e}')
 
     if not driver_sources:
         log.info(f'   ℹ️ No existing fuzz drivers found for {project_name}')

@@ -7,13 +7,12 @@ This module provides tools organized by category:
    - BashExecuteTool: Execute bash commands in project container
    - GDBExecuteTool: Execute GDB commands in debug session
 
-2. FuzzIntrospector Tools (src/tools/introspector.py):
-   - FuzzIntrospectorQueryTool: Unified query tool for all FI operations
-   - create_introspector_tool: Factory function for configured tool
-
-3. Context Pre-fetcher (src/tools/context_prefetcher.py):
+2. Context Pre-fetcher (src/tools/context_prefetcher.py):
    - AgentContextSpec: Defines NECESSARY vs OPTIONAL context per agent
    - Three-layer tool access: NECESSARY, OPTIONAL, EXPENSIVE
+
+Note: FuzzIntrospector tools removed (dependency on OSS-Fuzz infrastructure).
+      API information is now extracted locally via Clang/LLVM.
 """
 
 from src.tools.base import (
@@ -37,13 +36,6 @@ from src.tools.execution import (
     GDBExecuteTool,
 )
 
-from src.tools.introspector import (
-    QueryType,
-    FuzzIntrospectorInput,
-    FuzzIntrospectorQueryTool,
-    create_introspector_tool,
-)
-
 __all__ = [
     # Base
     "CommandInput",
@@ -60,9 +52,4 @@ __all__ = [
     # Execution
     "BashExecuteTool",
     "GDBExecuteTool",
-    # Introspector
-    "QueryType",
-    "FuzzIntrospectorInput",
-    "FuzzIntrospectorQueryTool",
-    "create_introspector_tool",
 ]

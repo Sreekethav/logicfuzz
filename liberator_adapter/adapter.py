@@ -1,136 +1,73 @@
 """
 Transform LogicFuzz data source to Liberator API model
 
-Support two data sources:
-FuzzIntrospector API (original way, inferred by adapter)
-   - Need FuzzIntrospector API available
-   - Inferred flag, size, const information by adapter
+Uses Clang/LLVM for API extraction:
+   - Requires benchmark object and source code access
+   - Extracts flag, size, const information directly from source
 
-Clang/LLVM (new way, inferred by adapter)
-   - Need benchmark object and source code access
-   - Inferred flag, size, const information by adapter
+Note: FuzzIntrospector dependency has been removed for internal project support.
 """
 from typing import Dict, List, Set, Optional
 from liberator_adapter.common.api import Api, Arg
 from liberator_adapter.dependency import DependencyGraph, TypeDependencyGraphGenerator
-from src.utils.api_context_extractor import APIContextExtractor
 
 class LiberatorAPIAdapter:
     """
-    Adapter to transform LogicFuzz data source to Liberator API model
+    Adapter to transform LogicFuzz data source to Liberator API model.
+
+    Uses Clang/LLVM for API extraction (FuzzIntrospector dependency removed).
     """
-    
-    def __init__(self, project_name: str, use_clang_llvm: bool = False, benchmark=None):
+
+    def __init__(self, project_name: str, benchmark, use_clang_llvm: bool = True):
         """
         Initialize adapter
-        
+
         Args:
             project_name: project name
-            use_clang_llvm: whether to use Clang/LLVM directly (need benchmark)
-                - True: use Clang/LLVM directly, no FuzzIntrospector needed
-                - False: use FuzzIntrospector API (default)
-            benchmark: benchmark object (required when use Clang/LLVM)
-        
+            benchmark: benchmark object (required for Clang/LLVM extraction)
+            use_clang_llvm: kept for backward compatibility, always True
+
         Note:
-            - When use_clang_llvm=True, no FuzzIntrospector API needed
-            - When use_clang_llvm=False, FuzzIntrospector API needed
+            FuzzIntrospector dependency has been removed.
+            All API extraction now uses Clang/LLVM directly.
         """
         self.project_name = project_name
-        self.use_clang_llvm = use_clang_llvm
+        self.use_clang_llvm = True  # Always use Clang/LLVM
         self.api_cache: Dict[str, Api] = {}
         self.last_metadata: Dict = {}
-        
-        if use_clang_llvm:
-            if not benchmark:
-                raise ValueError("benchmark is required when use_clang_llvm=True")
-            from liberator_adapter.extractors.hybrid_extractor import HybridAPIExtractor
-            self.hybrid_extractor = HybridAPIExtractor(benchmark)
-            self.extractor = None  # no FuzzIntrospector used
-        else:
-            self.extractor = APIContextExtractor(project_name)
-            self.hybrid_extractor = None
+
+        if not benchmark:
+            raise ValueError("benchmark is required for API extraction")
+        from liberator_adapter.extractors.hybrid_extractor import HybridAPIExtractor
+        self.hybrid_extractor = HybridAPIExtractor(benchmark)
         
     def convert_to_liberator_api(
-        self, 
+        self,
         function_signature: str,
         api_context: Optional[Dict] = None
     ) -> Optional[Api]:
         """
-        Transform function information to Liberator API object
-        
-        Select data source based on use_clang_llvm parameter:
-        - use_clang_llvm=True: use Clang/LLVM directly (no FuzzIntrospector)
-        - use_clang_llvm=False: use FuzzIntrospector API (original way)
-        
+        Transform function information to Liberator API object using Clang/LLVM.
+
         Args:
             function_signature: function signature (e.g. "int curl_easy_setopt(CURL *, int, ...)")
-            api_context: optional FuzzIntrospector context (only used in non-Clang/LLVM mode)
-                - if provided, can avoid duplicate query to FuzzIntrospector
-                - this parameter is ignored in Clang/LLVM mode
-        
+            api_context: ignored (kept for backward compatibility)
+
         Returns:
             Api object, return None if conversion fails
         """
-        # if using Clang/LLVM extraction
-        if self.use_clang_llvm and self.hybrid_extractor:
-            func_name = self._extract_function_name(function_signature)
-            if not func_name:
-                return None
-            
-            # check cache
-            if func_name in self.api_cache:
-                return self.api_cache[func_name]
-            
-            # get API from hybrid extractor
-            api = self.hybrid_extractor.get_api(func_name)
-            if api:
-                self.api_cache[func_name] = api
-            return api
-        
-        # original way: use FuzzIntrospector
-        # 1. get or use provided context
-        if not api_context:
-            api_context = self.extractor.extract(function_signature)
-        
-        if not api_context:
-            return None
-        
-        # 2. parse function signature
         func_name = self._extract_function_name(function_signature)
         if not func_name:
             return None
-        
-        # 3. build Arg object list
-        arguments_info = []
-        for param in api_context.get('parameters', []):
-            arg = Arg(
-                name=param.get('name', ''),
-                flag=self._determine_flag(param),  # 'ref', 'val', etc.
-                size=self._determine_size(param),
-                type=param.get('type', 'void'),
-                is_const=self._determine_const(param)
-            )
-            arguments_info.append(arg)
-        
-        # 4. build return value Arg
-        return_info = Arg(
-            name='return',
-            flag='val',
-            size=0,
-            type=api_context.get('return_type', 'void'),
-            is_const=[False]
-        )
-        
-        # 5. build Api object
-        api = Api(
-            function_name=func_name,
-            is_vararg=self._is_vararg(function_signature),
-            return_info=return_info,
-            arguments_info=arguments_info,
-            namespace=self._extract_namespace(func_name)
-        )
-        
-        self.api_cache[func_name] = api
+
+        # check cache
+        if func_name in self.api_cache:
+            return self.api_cache[func_name]
+
+        # get API from hybrid extractor
+        api = self.hybrid_extractor.get_api(func_name)
+        if api:
+            self.api_cache[func_name] = api
         return api
     
     def extract_all_apis(
@@ -142,21 +79,18 @@ class LiberatorAPIAdapter:
         compile_project: bool = True
     ) -> Dict[str, Api]:
         """
-        Extract all APIs (only available when use_clang_llvm=True)
-        
+        Extract all APIs using Clang/LLVM.
+
         Args:
             function_signatures: function signatures to extract (optional)
             include_dir: include directory (optional)
             public_headers_file: public headers file list (optional)
             bc_file: bitcode file path (optional)
             compile_project: whether to compile project (if bc_file is not provided)
-        
+
         Returns:
             Dictionary of function name to Api object
         """
-        if not self.use_clang_llvm or not self.hybrid_extractor:
-            raise RuntimeError("extract_all_apis() is only available when use_clang_llvm=True")
-        
         apis = self.hybrid_extractor.extract(
             function_signatures=function_signatures,
             include_dir=include_dir,

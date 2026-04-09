@@ -291,21 +291,18 @@ def select_top_k_sequences(
     entry_point_analysis: Optional[Dict[str, Any]] = None,
     top_k: int = 10,
     logger_instance: Optional[logging.Logger] = None,
-    existing_coverage: Optional[Dict[str, float]] = None,
-    important_apis: Optional[Set[str]] = None,
 ) -> Tuple[List[List[str]], Dict[str, Any]]:
     """
-    Convenience function matching the filter interface of L1-L3.
+    L4 Coverage Ranking: Select top-k sequences by diversity.
+
+    Note: L5 coverage-aware filtering was removed as it depends on
+    OSS-Fuzz runtime coverage data which is not available for internal projects.
 
     Args:
         sequences: List of API name sequences.
         entry_point_analysis: L1 analysis result (serialized).
         top_k: Number of sequences to select.
         logger_instance: Optional logger.
-        existing_coverage: Dict of function_name -> coverage % (0-100).
-                          Used for coverage-aware filtering to prioritize
-                          sequences targeting uncovered code.
-        important_apis: Set of API names that should be kept regardless of coverage.
 
     Returns:
         Tuple of (selected_sequences, selection_summary).
@@ -317,47 +314,6 @@ def select_top_k_sequences(
     if entry_point_analysis:
         entry_point_names = set(entry_point_analysis.get('entry_point_names', []))
 
-    # === L5: Coverage-Aware Pre-filtering (if coverage data available) ===
-    coverage_aware_stats = {}
-    if existing_coverage:
-        try:
-            from .coverage_aware_filter import CoverageAwareFilter
-
-            cov_filter = CoverageAwareFilter(
-                existing_coverage=existing_coverage,
-                important_apis=important_apis,
-            )
-
-            # Apply coverage-aware filtering
-            cov_result = cov_filter.filter_sequences(
-                sequences,
-                max_overlap=0.7,  # Allow up to 70% overlap
-                min_novelty=0.2,  # Require 20% novelty
-            )
-
-            # Use novelty-ranked sequences for further processing
-            sequences = cov_result.filtered_sequences
-            coverage_aware_stats = {
-                'coverage_aware_enabled': True,
-                'pre_filter_count': cov_result.stats['input_count'],
-                'post_filter_count': cov_result.stats['output_count'],
-                'avg_novelty_score': cov_result.stats['avg_novelty'],
-                'filtered_by_overlap': cov_result.stats['filtered_out'],
-            }
-
-            log.info(
-                f"   ✅ L5 Coverage-Aware: {cov_result.stats['input_count']} -> "
-                f"{cov_result.stats['output_count']} sequences "
-                f"(avg novelty: {cov_result.stats['avg_novelty']:.2f})"
-            )
-
-        except ImportError as e:
-            log.debug(f"Coverage-aware filter not available: {e}")
-            coverage_aware_stats = {'coverage_aware_enabled': False, 'error': str(e)}
-        except Exception as e:
-            log.warning(f"Coverage-aware filtering failed: {e}")
-            coverage_aware_stats = {'coverage_aware_enabled': False, 'error': str(e)}
-
     ranker = CoverageRanker(logger_instance=logger_instance)
     result = ranker.rank_and_select(sequences, entry_point_names, top_k)
 
@@ -366,7 +322,6 @@ def select_top_k_sequences(
         'output': len(result.selected_sequences),
         'api_coverage': len(result.total_api_coverage),
         'stats': result.get_stats(),
-        'coverage_aware': coverage_aware_stats,
     }
 
     return result.selected_sequences, summary

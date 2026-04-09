@@ -69,13 +69,7 @@ from .coverage_ranker import (
     select_top_k_sequences,
 )
 
-# L5: Coverage-Aware Filter (Progressive Filter Pipeline)
-from .coverage_aware_filter import (
-    CoverageAwareFilter,
-    CoverageAwareResult,
-    get_function_coverage_from_introspector,
-    get_coverage_from_textcov,
-)
+# Note: L5 Coverage-Aware Filter removed (depends on OSS-Fuzz runtime data)
 
 # Special Pattern Analyzers
 from .special_patterns import (
