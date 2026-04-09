@@ -320,18 +320,34 @@ class FuzzingContext:
                     log.info('  📖 Loading documentation knowledge for RAG retrieval...')
                     try:
                         from src.context.doc_knowledge import create_knowledge_manager
+                        from src.llm.adapter import create_llm_adapter
 
                         persist_dir = f"./results/{project_name}/doc_knowledge"
+                        # Create LLM adapter for summarization/filtering (PromeFuzz-style)
+                        llm_adapter = create_llm_adapter(llm_client) if llm_client else None
+
                         doc_manager = create_knowledge_manager(
                             project_name=project_name,
                             document_paths=document_paths,
                             persist_dir=persist_dir,
-                            logger_instance=log
+                            logger_instance=log,
+                            llm_adapter=llm_adapter
                         )
 
                         library_purpose = doc_manager.retrieve_library_purpose()
                         api_names = [api['function_name'] for api in cached.project_apis[:50]]
                         func_docs = doc_manager.get_function_documentation(api_names)
+
+                        # Extract structured API semantics (Phase 1 enhancement)
+                        api_signatures = {
+                            api['function_name']: api.get('signature', '')
+                            for api in cached.project_apis[:50]
+                        }
+                        # Only extract semantics for top APIs to limit LLM calls
+                        top_api_names = api_names[:20]
+                        api_semantics = doc_manager.extract_api_semantics_batch(
+                            top_api_names, api_signatures
+                        ) if llm_adapter else {}
 
                         document_knowledge = {
                             'library_purpose': library_purpose,
@@ -339,11 +355,15 @@ class FuzzingContext:
                                 name: [{'content': e.content, 'source': e.source} for e in excerpts]
                                 for name, excerpts in func_docs.items()
                             },
+                            'api_semantics': {
+                                name: sem.to_prompt_text() for name, sem in api_semantics.items()
+                            } if api_semantics else {},
                             'indexed_paths': document_paths,
                             'persist_dir': persist_dir,
                         }
                         num_func_docs = len([f for f in func_docs.values() if f])
-                        log.info(f'   ✅ Loaded documentation: {num_func_docs} functions with docs')
+                        num_semantics = len(api_semantics)
+                        log.info(f'   ✅ Loaded documentation: {num_func_docs} functions with docs, {num_semantics} with structured semantics')
                     except Exception as e:
                         log.warning(f"Documentation loading failed (non-critical): {e}")
 
@@ -1021,24 +1041,40 @@ class FuzzingContext:
             log.info('  13/13 Loading documentation knowledge for RAG retrieval...')
             try:
                 from src.context.doc_knowledge import create_knowledge_manager
+                from src.llm.adapter import create_llm_adapter
 
                 # Create persist directory for the vector database
                 persist_dir = f"./results/{project_name}/doc_knowledge"
+
+                # Create LLM adapter for summarization/filtering (PromeFuzz-style)
+                llm_adapter = create_llm_adapter(llm_client) if llm_client else None
 
                 # Create knowledge manager and index documents
                 doc_manager = create_knowledge_manager(
                     project_name=project_name,
                     document_paths=document_paths,
                     persist_dir=persist_dir,
-                    logger_instance=log
+                    logger_instance=log,
+                    llm_adapter=llm_adapter
                 )
 
-                # Retrieve library purpose
+                # Retrieve library purpose (uses LLM summarization if available)
                 library_purpose = doc_manager.retrieve_library_purpose()
 
-                # Get function-specific documentation for APIs
+                # Get function-specific documentation for APIs (uses LLM filtering if available)
                 api_names = [api['function_name'] for api in project_apis[:50]]  # Limit to first 50
                 func_docs = doc_manager.get_function_documentation(api_names)
+
+                # Extract structured API semantics (Phase 1 enhancement)
+                api_signatures = {
+                    api['function_name']: api.get('signature', '')
+                    for api in project_apis[:50]
+                }
+                # Only extract semantics for top APIs to limit LLM calls
+                top_api_names = api_names[:20]
+                api_semantics = doc_manager.extract_api_semantics_batch(
+                    top_api_names, api_signatures
+                ) if llm_adapter else {}
 
                 # Store knowledge
                 document_knowledge = {
@@ -1047,13 +1083,17 @@ class FuzzingContext:
                         name: [{'content': e.content, 'source': e.source} for e in excerpts]
                         for name, excerpts in func_docs.items()
                     },
+                    'api_semantics': {
+                        name: sem.to_prompt_text() for name, sem in api_semantics.items()
+                    } if api_semantics else {},
                     'indexed_paths': document_paths,
                     'persist_dir': persist_dir,
                 }
 
                 num_func_docs = len([f for f in func_docs.values() if f])
+                num_semantics = len(api_semantics)
                 log.info(
-                    f'   ✅ Loaded documentation: {num_func_docs} functions with docs'
+                    f'   ✅ Loaded documentation: {num_func_docs} functions with docs, {num_semantics} with structured semantics'
                 )
             except Exception as e:
                 log.warning(f"Documentation loading failed (non-critical): {e}")
@@ -1408,7 +1448,13 @@ def _analyze_driver_patterns(driver_sources: List[Dict[str, str]],
     """
     Analyze existing drivers to extract reusable patterns using XML tag format.
 
-    Returns dict with 'core_functionality', 'setup_teardown', and 'code_patterns' keys.
+    Returns dict with structured patterns extracted from existing fuzz drivers:
+    - core_functionality: Library purpose and essential APIs
+    - setup_teardown: Initialization and cleanup patterns
+    - code_patterns: How fuzz data flows into APIs
+    - header_config: Header includes and preprocessor setup (Phase 2)
+    - boundary_checks: Size/null checks for robustness (Phase 2)
+    - error_handling: Error handling patterns (Phase 2)
     """
     from src.utils.prompt_loader import load_prompt_file
     from src.agents.utils import parse_tag
@@ -1430,25 +1476,34 @@ def _analyze_driver_patterns(driver_sources: List[Dict[str, str]],
         return {
             'core_functionality': '',
             'setup_teardown': '',
-            'code_patterns': ''
+            'code_patterns': '',
+            'header_config': '',
+            'boundary_checks': '',
+            'error_handling': ''
         }
 
     try:
         response = llm_client.query(prompt)
         log.info('Analyzed driver patterns with LLM')
 
-        # Parse XML tags from response
+        # Parse XML tags from response (including Phase 2 enhancements)
         result = {
             'core_functionality': parse_tag(response, 'core_functionality'),
             'setup_teardown': parse_tag(response, 'setup_teardown'),
             'code_patterns': parse_tag(response, 'code_patterns'),
+            # Phase 2: Structured patterns for Fixer
+            'header_config': parse_tag(response, 'header_config'),
+            'boundary_checks': parse_tag(response, 'boundary_checks'),
+            'error_handling': parse_tag(response, 'error_handling'),
         }
 
-        # Log if any tags are missing
-        for key, value in result.items():
-            if not value:
-                log.debug(
-                    f"Missing <{key}> tag in driver pattern analysis response")
+        # Log extraction results
+        core_tags = ['core_functionality', 'setup_teardown', 'code_patterns']
+        phase2_tags = ['header_config', 'boundary_checks', 'error_handling']
+
+        core_found = sum(1 for k in core_tags if result.get(k))
+        phase2_found = sum(1 for k in phase2_tags if result.get(k))
+        log.debug(f"Driver patterns: {core_found}/3 core, {phase2_found}/3 structured")
 
         return result
 
@@ -1457,7 +1512,10 @@ def _analyze_driver_patterns(driver_sources: List[Dict[str, str]],
         return {
             'core_functionality': '',
             'setup_teardown': '',
-            'code_patterns': ''
+            'code_patterns': '',
+            'header_config': '',
+            'boundary_checks': '',
+            'error_handling': ''
         }
 
 

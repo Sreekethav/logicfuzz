@@ -54,18 +54,89 @@ class DocumentExcerpt:
 
 
 @dataclass
+class ParameterConstraint:
+    """Constraint on an API parameter extracted from documentation.
+
+    Captures semantic constraints that help generate correct fuzz drivers.
+    """
+    param_name: str
+    constraints: List[str]  # e.g., ["must not be NULL", "size > 0", "valid UTF-8"]
+    ownership: str = ""     # "caller_frees", "callee_frees", "borrowed", ""
+    default_value: str = "" # If documented
+
+
+@dataclass
+class APISemantics:
+    """Structured semantics of an API extracted from documentation.
+
+    This captures the "WHAT" and "WHY" from documentation:
+    - What does the API do?
+    - What constraints must be satisfied?
+    - What does the return value mean?
+    """
+    function_name: str
+    brief_description: str = ""
+
+    # Parameter constraints
+    parameter_constraints: Dict[str, ParameterConstraint] = field(default_factory=dict)
+
+    # Return value semantics
+    return_description: str = ""
+    return_ownership: str = ""  # "caller_frees", "static", "internal", ""
+    error_return_value: str = ""  # e.g., "NULL on error", "-1 on failure"
+
+    # Preconditions and postconditions
+    preconditions: List[str] = field(default_factory=list)  # "must call X before"
+    postconditions: List[str] = field(default_factory=list)  # "resource is initialized"
+
+    # Related APIs
+    init_api: str = ""      # API that must be called before this one
+    cleanup_api: str = ""   # API that must be called after this one
+
+    # Source documentation excerpts (for reference)
+    source_excerpts: List[str] = field(default_factory=list)
+
+    def to_prompt_text(self) -> str:
+        """Format for inclusion in LLM prompt."""
+        lines = [f"**{self.function_name}**"]
+        if self.brief_description:
+            lines.append(f"  Purpose: {self.brief_description}")
+
+        if self.parameter_constraints:
+            lines.append("  Parameters:")
+            for param, constraint in self.parameter_constraints.items():
+                constraint_str = ", ".join(constraint.constraints) if constraint.constraints else "no constraints"
+                ownership_str = f" [{constraint.ownership}]" if constraint.ownership else ""
+                lines.append(f"    - {param}: {constraint_str}{ownership_str}")
+
+        if self.error_return_value:
+            lines.append(f"  Returns: {self.error_return_value}")
+        if self.return_ownership:
+            lines.append(f"  Return ownership: {self.return_ownership}")
+
+        if self.preconditions:
+            lines.append(f"  Preconditions: {'; '.join(self.preconditions)}")
+        if self.cleanup_api:
+            lines.append(f"  Cleanup: call {self.cleanup_api} after use")
+
+        return "\n".join(lines)
+
+
+@dataclass
 class DocumentKnowledge:
     """Container for project documentation knowledge.
 
     Attributes:
         library_purpose: One-sentence description of the library's purpose
         function_docs: Dict mapping function names to their documentation
+        api_semantics: Dict mapping function names to structured APISemantics
         api_usage_examples: List of usage examples from documentation
         data_type_docs: Dict mapping type names to their documentation
         excerpts_by_query: Cache of retrieved excerpts by query string
     """
     library_purpose: str = ""
     function_docs: Dict[str, str] = field(default_factory=dict)
+    api_semantics: Dict[str, APISemantics] = field(default_factory=dict)  # NEW: structured semantics
     api_usage_examples: List[str] = field(default_factory=list)
     data_type_docs: Dict[str, str] = field(default_factory=dict)
     excerpts_by_query: Dict[str, List[DocumentExcerpt]] = field(default_factory=dict)
@@ -341,6 +412,7 @@ class DocumentKnowledgeManager:
     """Manages documentation knowledge with RAG-based retrieval.
 
     Uses ChromaDB for vector storage and semantic search.
+    Optionally uses LLM for summarization and excerpt filtering (PromeFuzz-style).
     """
 
     def __init__(
@@ -348,7 +420,8 @@ class DocumentKnowledgeManager:
         project_name: str,
         persist_dir: Optional[str] = None,
         embedding_model: str = "all-MiniLM-L6-v2",
-        logger_instance: Optional[logging.Logger] = None
+        logger_instance: Optional[logging.Logger] = None,
+        llm_adapter: Optional[Any] = None
     ):
         """Initialize the document knowledge manager.
 
@@ -357,12 +430,14 @@ class DocumentKnowledgeManager:
             persist_dir: Directory to persist ChromaDB (None for in-memory)
             embedding_model: Name of embedding model (default: sentence-transformers)
             logger_instance: Optional logger
+            llm_adapter: Optional LLM adapter for summarization/filtering
         """
         self.project_name = project_name
         self.persist_dir = persist_dir
         self.embedding_model = embedding_model
         self.logger = logger_instance or logging.getLogger(__name__)
         self.loader = DocumentLoader()
+        self.llm_adapter = llm_adapter  # For LLM-based summarization
 
         # Initialize ChromaDB
         if persist_dir:
@@ -647,6 +722,9 @@ class DocumentKnowledgeManager:
     def retrieve_library_purpose(self) -> str:
         """Retrieve and generate a library purpose summary.
 
+        Uses LLM summarization if llm_adapter is available (PromeFuzz-style),
+        otherwise falls back to simple truncation.
+
         Returns:
             One-sentence description of the library's purpose
         """
@@ -659,33 +737,283 @@ class DocumentKnowledgeManager:
             top_k=3
         )
 
-        if excerpts:
-            # Combine excerpts for context
-            combined = "\n\n".join([e.content for e in excerpts])
-            # Store for reuse (actual summarization would use LLM)
-            self.knowledge.library_purpose = combined[:500]  # Truncate for now
+        if not excerpts:
+            return self.knowledge.library_purpose
+
+        # Format excerpts for prompt
+        excerpts_text = self.format_excerpts_for_prompt(excerpts, max_length=3000)
+
+        # Use LLM for summarization if available (PromeFuzz-style)
+        if self.llm_adapter and excerpts_text:
+            try:
+                prompt = f"""Below are excerpts from documents. Please provide a summary of the library's purpose, starting your response with "{self.project_name} is …".
+
+{excerpts_text}"""
+                summary = self.llm_adapter.query(prompt)
+                if summary and len(summary) > 10:
+                    self.knowledge.library_purpose = summary.strip()
+                    self.logger.debug(f"LLM summarized library purpose: {summary[:100]}...")
+                    return self.knowledge.library_purpose
+            except Exception as e:
+                self.logger.warning(f"LLM summarization failed, using fallback: {e}")
+
+        # Fallback: simple truncation
+        combined = "\n\n".join([e.content for e in excerpts])
+        self.knowledge.library_purpose = combined[:500]
 
         return self.knowledge.library_purpose
+
+    def filter_valuable_excerpts(
+        self,
+        function_name: str,
+        excerpts: List[DocumentExcerpt]
+    ) -> List[DocumentExcerpt]:
+        """Filter excerpts to keep only valuable ones for a function.
+
+        Uses LLM to determine which excerpts are valuable (PromeFuzz-style).
+
+        Args:
+            function_name: Name of the target function
+            excerpts: List of candidate excerpts
+
+        Returns:
+            Filtered list of valuable excerpts
+        """
+        if not excerpts:
+            return []
+
+        # Without LLM, return all excerpts
+        if not self.llm_adapter:
+            return excerpts
+
+        # Format excerpts for LLM evaluation
+        excerpts_text = self.format_excerpts_for_prompt(excerpts, max_length=4000)
+
+        try:
+            system_context = f"""You are an expert in the {self.project_name} library. You will receive excerpts from the library's documentation. Your task is to identify which excerpts describe the API function {function_name}. Consider the following questions:
+
+- Does the excerpt explain the function's purpose?
+- Does it detail how the function is utilized?
+- Does it include any code examples that call the function?
+
+If any of these criteria are met, the excerpt is deemed valuable."""
+
+            user_prompt = f"""Below are some excerpts from the library documents. Please respond with the numbers of the valuable excerpts, each on a new line, without additional information. If there are no valuable excerpts, reply with '0'.
+
+{excerpts_text}"""
+
+            response = self.llm_adapter.query(f"{system_context}\n\n{user_prompt}")
+
+            # Parse response to get valuable excerpt indices
+            valuable_indices = set()
+            for line in response.strip().split('\n'):
+                line = line.strip()
+                # Extract numbers from the line
+                for word in line.split():
+                    try:
+                        idx = int(word.rstrip('.,;'))
+                        if 1 <= idx <= len(excerpts):
+                            valuable_indices.add(idx - 1)  # Convert to 0-indexed
+                    except ValueError:
+                        continue
+
+            if valuable_indices:
+                filtered = [excerpts[i] for i in sorted(valuable_indices)]
+                self.logger.debug(
+                    f"Filtered {len(excerpts)} -> {len(filtered)} valuable excerpts for {function_name}"
+                )
+                return filtered
+
+        except Exception as e:
+            self.logger.warning(f"LLM excerpt filtering failed for {function_name}: {e}")
+
+        # Fallback: return all excerpts
+        return excerpts
+
+    def extract_api_semantics(
+        self,
+        function_name: str,
+        function_signature: str = "",
+        excerpts: Optional[List[DocumentExcerpt]] = None
+    ) -> Optional[APISemantics]:
+        """Extract structured API semantics from documentation.
+
+        Uses LLM to parse documentation excerpts and extract:
+        - Parameter constraints (NULL checks, size limits, ownership)
+        - Return value semantics (error values, ownership)
+        - Preconditions and postconditions
+        - Related init/cleanup APIs
+
+        Args:
+            function_name: Name of the function
+            function_signature: Optional function signature for context
+            excerpts: Optional pre-retrieved excerpts (will retrieve if not provided)
+
+        Returns:
+            APISemantics object or None if extraction fails
+        """
+        # Check cache
+        if function_name in self.knowledge.api_semantics:
+            return self.knowledge.api_semantics[function_name]
+
+        # Retrieve documentation if not provided
+        if excerpts is None:
+            excerpts = self.retrieve_for_function(function_name, top_k=4)
+
+        if not excerpts:
+            return None
+
+        # Without LLM, create basic semantics from raw excerpts
+        if not self.llm_adapter:
+            semantics = APISemantics(
+                function_name=function_name,
+                source_excerpts=[e.content[:500] for e in excerpts[:2]]
+            )
+            self.knowledge.api_semantics[function_name] = semantics
+            return semantics
+
+        # Use LLM to extract structured semantics
+        excerpts_text = self.format_excerpts_for_prompt(excerpts, max_length=3000)
+
+        prompt = f"""Analyze the documentation for the function `{function_name}` and extract structured semantic information.
+
+{f"Function signature: {function_signature}" if function_signature else ""}
+
+Documentation excerpts:
+{excerpts_text}
+
+Extract the following information in JSON format:
+{{
+  "brief_description": "One sentence describing what the function does",
+  "parameters": {{
+    "param_name": {{
+      "constraints": ["list of constraints like 'must not be NULL', 'size > 0'"],
+      "ownership": "caller_frees | callee_frees | borrowed | (empty if unknown)"
+    }}
+  }},
+  "return": {{
+    "description": "What the return value represents",
+    "ownership": "caller_frees | static | internal | (empty if unknown)",
+    "error_value": "What value indicates error (e.g., 'NULL', '-1', 'false')"
+  }},
+  "preconditions": ["Conditions that must be true before calling"],
+  "postconditions": ["Conditions guaranteed after calling"],
+  "init_api": "API that must be called before this one (or empty)",
+  "cleanup_api": "API that must be called after this one (or empty)"
+}}
+
+If information is not available in the documentation, use empty strings or empty lists.
+Respond with ONLY the JSON, no other text."""
+
+        try:
+            response = self.llm_adapter.query(prompt)
+
+            # Parse JSON response
+            import json
+            # Try to extract JSON from response (handle markdown code blocks)
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                # Remove markdown code block
+                lines = json_str.split("\n")
+                json_str = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+
+            data = json.loads(json_str)
+
+            # Build APISemantics from parsed data
+            param_constraints = {}
+            for param_name, param_data in data.get("parameters", {}).items():
+                param_constraints[param_name] = ParameterConstraint(
+                    param_name=param_name,
+                    constraints=param_data.get("constraints", []),
+                    ownership=param_data.get("ownership", "")
+                )
+
+            semantics = APISemantics(
+                function_name=function_name,
+                brief_description=data.get("brief_description", ""),
+                parameter_constraints=param_constraints,
+                return_description=data.get("return", {}).get("description", ""),
+                return_ownership=data.get("return", {}).get("ownership", ""),
+                error_return_value=data.get("return", {}).get("error_value", ""),
+                preconditions=data.get("preconditions", []),
+                postconditions=data.get("postconditions", []),
+                init_api=data.get("init_api", ""),
+                cleanup_api=data.get("cleanup_api", ""),
+                source_excerpts=[e.content[:300] for e in excerpts[:2]]
+            )
+
+            self.knowledge.api_semantics[function_name] = semantics
+            self.logger.debug(f"Extracted API semantics for {function_name}")
+            return semantics
+
+        except json.JSONDecodeError as e:
+            self.logger.warning(f"Failed to parse API semantics JSON for {function_name}: {e}")
+        except Exception as e:
+            self.logger.warning(f"Failed to extract API semantics for {function_name}: {e}")
+
+        # Fallback: basic semantics
+        semantics = APISemantics(
+            function_name=function_name,
+            source_excerpts=[e.content[:500] for e in excerpts[:2]]
+        )
+        self.knowledge.api_semantics[function_name] = semantics
+        return semantics
+
+    def extract_api_semantics_batch(
+        self,
+        function_names: List[str],
+        function_signatures: Optional[Dict[str, str]] = None
+    ) -> Dict[str, APISemantics]:
+        """Extract API semantics for multiple functions.
+
+        Args:
+            function_names: List of function names to analyze
+            function_signatures: Optional dict mapping function names to signatures
+
+        Returns:
+            Dict mapping function names to APISemantics
+        """
+        function_signatures = function_signatures or {}
+        result = {}
+
+        for func_name in function_names:
+            sig = function_signatures.get(func_name, "")
+            semantics = self.extract_api_semantics(func_name, sig)
+            if semantics:
+                result[func_name] = semantics
+
+        return result
 
     def get_function_documentation(
         self,
         function_names: List[str],
-        top_k_per_function: int = 2
+        top_k_per_function: int = 2,
+        filter_valuable: bool = True
     ) -> Dict[str, List[DocumentExcerpt]]:
         """Get documentation for multiple functions.
 
         Args:
             function_names: List of function names
             top_k_per_function: Excerpts per function
+            filter_valuable: If True and LLM available, filter to valuable excerpts
 
         Returns:
             Dict mapping function names to their documentation excerpts
         """
         result = {}
         for func_name in function_names:
-            excerpts = self.retrieve_for_function(func_name, top_k_per_function)
+            # Retrieve more candidates if we're going to filter
+            retrieve_k = top_k_per_function * 2 if (filter_valuable and self.llm_adapter) else top_k_per_function
+            excerpts = self.retrieve_for_function(func_name, retrieve_k)
+
             if excerpts:
-                result[func_name] = excerpts
+                # Filter to valuable excerpts if enabled
+                if filter_valuable and self.llm_adapter:
+                    excerpts = self.filter_valuable_excerpts(func_name, excerpts)
+
+                # Take top_k after filtering
+                result[func_name] = excerpts[:top_k_per_function]
+
         return result
 
     def format_excerpts_for_prompt(
@@ -724,7 +1052,8 @@ def create_knowledge_manager(
     project_name: str,
     document_paths: Optional[List[str]] = None,
     persist_dir: Optional[str] = None,
-    logger_instance: Optional[logging.Logger] = None
+    logger_instance: Optional[logging.Logger] = None,
+    llm_adapter: Optional[Any] = None
 ) -> DocumentKnowledgeManager:
     """Factory function to create and initialize a DocumentKnowledgeManager.
 
@@ -733,6 +1062,7 @@ def create_knowledge_manager(
         document_paths: List of document paths to index
         persist_dir: Directory to persist the vector database
         logger_instance: Optional logger
+        llm_adapter: Optional LLM adapter for summarization/filtering (PromeFuzz-style)
 
     Returns:
         Initialized DocumentKnowledgeManager
@@ -740,7 +1070,8 @@ def create_knowledge_manager(
     manager = DocumentKnowledgeManager(
         project_name=project_name,
         persist_dir=persist_dir,
-        logger_instance=logger_instance
+        logger_instance=logger_instance,
+        llm_adapter=llm_adapter
     )
 
     if document_paths:

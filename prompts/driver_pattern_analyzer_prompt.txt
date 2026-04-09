@@ -16,6 +16,15 @@ Analyze the drivers above and extract:
    PRIORITIZE patterns where fuzz data directly creates objects (e.g., OpenFromMem(data, size)).
    For transform/conversion APIs, show the complete flow: input creation -> transform -> execution.
 
+3. HEADER CONFIGURATION: List ALL headers included in the drivers, IN ORDER.
+   Note any preprocessor defines (#define) that appear before includes.
+   Identify if extern "C" is used (for C++ drivers calling C libraries).
+
+4. BOUNDARY CHECKS: Extract any size/null checks at the start of the fuzzer.
+   These are CRITICAL for avoiding trivial crashes.
+
+5. ERROR HANDLING: How do drivers handle API errors? Early returns? Cleanup on error?
+
 Focus on patterns that maximize coverage by exercising core library paths.
 </instructions>
 
@@ -33,4 +42,27 @@ Respond with EXACTLY these XML tags:
 <setup_teardown>
 [Common initialization and cleanup patterns from the drivers]
 </setup_teardown>
+
+<header_config>
+[List headers in order, one per line. Mark system headers with (system). Example:
+#include <stdint.h> (system)
+#include <string.h> (system)
+#include "library.h"
+Note any #define directives needed before includes.
+If extern "C" is needed, state: EXTERN_C_REQUIRED: yes/no]
+</header_config>
+
+<boundary_checks>
+[List boundary check patterns, one per line. Example:
+if (size < 4) return 0;
+if (data == nullptr) return 0;
+if (size > MAX_SIZE) size = MAX_SIZE;]
+</boundary_checks>
+
+<error_handling>
+[Describe error handling patterns:
+- Early return on error: yes/no
+- Cleanup on error path: describe pattern
+- Error value checks: list common patterns]
+</error_handling>
 </output_format>

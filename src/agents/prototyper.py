@@ -1189,16 +1189,17 @@ Output your fuzz driver code inside <fuzz_target> tags.
                                      api_sequences: List[List[str]]) -> str:
         """Format documentation knowledge for the prompt.
 
-        Includes library purpose and function-specific documentation excerpts
-        retrieved via RAG from project documentation.
+        Includes library purpose, structured API semantics, and function-specific
+        documentation excerpts retrieved via RAG from project documentation.
         """
         if not document_knowledge:
             return ""
 
         library_purpose = document_knowledge.get('library_purpose', '')
         function_docs = document_knowledge.get('function_docs', {})
+        api_semantics = document_knowledge.get('api_semantics', {})
 
-        if not library_purpose and not function_docs:
+        if not library_purpose and not function_docs and not api_semantics:
             return ""
 
         lines = ["<documentation_knowledge>"]
@@ -1216,23 +1217,43 @@ Output your fuzz driver code inside <fuzz_target> tags.
             lines.append("")
 
         # Get APIs from sequences for targeted documentation
-        if function_docs:
-            sequence_apis = set()
-            for seq in api_sequences[:5]:  # Focus on first few sequences
-                sequence_apis.update(seq)
+        sequence_apis = set()
+        for seq in api_sequences[:5]:  # Focus on first few sequences
+            sequence_apis.update(seq)
 
-            # Filter to APIs that appear in sequences
+        # Include structured API semantics (Phase 1: higher value than raw excerpts)
+        if api_semantics:
+            relevant_semantics = {
+                api: sem for api, sem in api_semantics.items()
+                if api in sequence_apis
+            }
+
+            if relevant_semantics:
+                lines.append("<api_constraints>")
+                lines.append("**IMPORTANT: Structured API constraints (must follow these):**")
+                lines.append("")
+
+                for api_name, semantics_text in list(relevant_semantics.items())[:10]:
+                    lines.append(semantics_text)
+                    lines.append("")
+
+                lines.append("</api_constraints>")
+                lines.append("")
+
+        # Include raw documentation excerpts (supplementary to structured semantics)
+        if function_docs:
+            # Filter to APIs that appear in sequences but don't have structured semantics
             relevant_docs = {
                 api: docs for api, docs in function_docs.items()
-                if api in sequence_apis and docs
+                if api in sequence_apis and docs and api not in api_semantics
             }
 
             if relevant_docs:
                 lines.append("<function_documentation>")
-                lines.append("**Documentation for APIs in your sequences:**")
+                lines.append("**Additional documentation for APIs in your sequences:**")
                 lines.append("")
 
-                for api_name, excerpts in list(relevant_docs.items())[:8]:
+                for api_name, excerpts in list(relevant_docs.items())[:6]:
                     lines.append(f"**{api_name}**:")
                     for excerpt in excerpts[:2]:  # Limit excerpts per function
                         content = excerpt.get('content', '')
@@ -1246,15 +1267,19 @@ Output your fuzz driver code inside <fuzz_target> tags.
                 lines.append("</function_documentation>")
 
         lines.append("")
-        lines.append("**Note:** Use this documentation to understand API semantics,")
-        lines.append("parameter constraints, and correct usage patterns.")
+        lines.append("**Note:** Use the API constraints above to ensure correct parameter handling,")
+        lines.append("proper resource cleanup, and valid API call sequences.")
         lines.append("</documentation_knowledge>")
 
         return "\n".join(lines)
 
     def _format_driver_knowledge(self, driver_knowledge: Dict[str,
                                                               Any]) -> str:
-        """Format knowledge extracted from existing drivers."""
+        """Format knowledge extracted from existing drivers.
+
+        Includes both semantic patterns (code_patterns, setup_teardown) and
+        structural patterns (header_config, boundary_checks) from Phase 2.
+        """
         if not driver_knowledge:
             return ""
 
@@ -1292,6 +1317,30 @@ Output your fuzz driver code inside <fuzz_target> tags.
             lines.append("<setup_teardown>")
             lines.append(setup_teardown)
             lines.append("</setup_teardown>")
+            lines.append("")
+
+        # Phase 2: Structural patterns
+        header_config = analysis.get('header_config', '')
+        if header_config:
+            lines.append("<header_config>")
+            lines.append("**FOLLOW THIS HEADER CONFIGURATION:**")
+            lines.append(header_config)
+            lines.append("</header_config>")
+            lines.append("")
+
+        boundary_checks = analysis.get('boundary_checks', '')
+        if boundary_checks:
+            lines.append("<boundary_checks>")
+            lines.append("**ADD THESE BOUNDARY CHECKS at the start of LLVMFuzzerTestOneInput:**")
+            lines.append(boundary_checks)
+            lines.append("</boundary_checks>")
+            lines.append("")
+
+        error_handling = analysis.get('error_handling', '')
+        if error_handling:
+            lines.append("<error_handling>")
+            lines.append(error_handling)
+            lines.append("</error_handling>")
             lines.append("")
 
         if driver_sources:

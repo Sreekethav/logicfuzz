@@ -255,7 +255,11 @@ class LangGraphFixer(LangGraphAgent, ToolCallingMixin):
 
     def _format_driver_knowledge_for_fixer(self, driver_knowledge: Dict[str, Any],
                                            errors: List[str]) -> str:
-        """Format existing driver knowledge as reference for fixing errors."""
+        """Format existing driver knowledge as reference for fixing errors.
+
+        Uses Phase 2 structured patterns (header_config, boundary_checks, error_handling)
+        for targeted fix suggestions based on error type.
+        """
         if not driver_knowledge:
             return ""
 
@@ -265,7 +269,7 @@ class LangGraphFixer(LangGraphAgent, ToolCallingMixin):
         if not driver_sources and not analysis:
             return ""
 
-        # Check if errors are related to headers/includes
+        # Classify error types for targeted guidance
         has_header_errors = any(
             'file not found' in e.lower() or
             '#include' in e.lower() or
@@ -273,10 +277,16 @@ class LangGraphFixer(LangGraphAgent, ToolCallingMixin):
             for e in errors
         )
 
-        # Check if errors are related to undefined references (linker)
         has_linker_errors = any(
             'undefined reference' in e.lower() or
             'undefined symbol' in e.lower()
+            for e in errors
+        )
+
+        has_type_errors = any(
+            'unknown type' in e.lower() or
+            'undeclared identifier' in e.lower() or
+            'use of undeclared' in e.lower()
             for e in errors
         )
 
@@ -286,25 +296,19 @@ class LangGraphFixer(LangGraphAgent, ToolCallingMixin):
         )
         lines.append("Use them as reference for fixing compilation errors.\n")
 
-        # Add setup/teardown patterns if available
-        if analysis.get('setup_teardown'):
-            lines.append("<setup_teardown_patterns>")
-            lines.append(analysis['setup_teardown'])
-            lines.append("</setup_teardown_patterns>\n")
-
-        # Add code patterns if available
-        if analysis.get('code_patterns'):
-            lines.append("<code_patterns>")
-            lines.append(analysis['code_patterns'])
-            lines.append("</code_patterns>\n")
-
-        # For header/include errors, show include patterns from existing drivers
-        if has_header_errors and driver_sources:
+        # Phase 2: Use structured header_config for header-related errors
+        header_config = analysis.get('header_config', '')
+        if has_header_errors and header_config:
+            lines.append("<header_fix_reference>")
+            lines.append("**CRITICAL: Use this exact header configuration from working drivers:**")
+            lines.append(header_config)
+            lines.append("</header_fix_reference>\n")
+        elif has_header_errors and driver_sources:
+            # Fallback: extract includes from raw driver sources
             lines.append("<working_includes>")
             lines.append("Include patterns from working fuzzers:")
             for driver in driver_sources[:2]:
                 source = driver.get('source', '')
-                # Extract include lines
                 includes = [
                     line.strip() for line in source.split('\n')
                     if line.strip().startswith('#include')
@@ -314,13 +318,39 @@ class LangGraphFixer(LangGraphAgent, ToolCallingMixin):
                     lines.extend(includes)
             lines.append("</working_includes>\n")
 
+        # Phase 2: Use structured boundary_checks for crash-related issues
+        boundary_checks = analysis.get('boundary_checks', '')
+        if boundary_checks:
+            lines.append("<boundary_check_patterns>")
+            lines.append("**Add these boundary checks to prevent crashes:**")
+            lines.append(boundary_checks)
+            lines.append("</boundary_check_patterns>\n")
+
+        # Phase 2: Use error_handling patterns
+        error_handling = analysis.get('error_handling', '')
+        if error_handling:
+            lines.append("<error_handling_patterns>")
+            lines.append(error_handling)
+            lines.append("</error_handling_patterns>\n")
+
+        # Add setup/teardown patterns if available
+        if analysis.get('setup_teardown'):
+            lines.append("<setup_teardown_patterns>")
+            lines.append(analysis['setup_teardown'])
+            lines.append("</setup_teardown_patterns>\n")
+
+        # Add code patterns for type/usage errors
+        if (has_type_errors or has_linker_errors) and analysis.get('code_patterns'):
+            lines.append("<code_patterns>")
+            lines.append(analysis['code_patterns'])
+            lines.append("</code_patterns>\n")
+
         # For linker errors, show full driver as reference
         if has_linker_errors and driver_sources:
             lines.append("<linker_reference>")
             lines.append(
                 "For undefined reference errors, check how existing fuzzers handle linking:"
             )
-            # Show first driver's approach (truncated)
             driver = driver_sources[0]
             source = driver.get('source', '')
             if len(source) > 1500:

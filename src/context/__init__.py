@@ -12,6 +12,8 @@ from src.context.doc_knowledge import (
     DocumentKnowledgeManager,
     DocumentExcerpt,
     DocumentKnowledge,
+    ParameterConstraint,
+    APISemantics,
     create_knowledge_manager,
 )
 from src.context.session_memory_injector import (
@@ -25,6 +27,8 @@ __all__ = [
     "DocumentKnowledgeManager",
     "DocumentExcerpt",
     "DocumentKnowledge",
+    "ParameterConstraint",
+    "APISemantics",
     "create_knowledge_manager",
     "build_prompt_with_session_memory",
     "extract_session_memory_updates_from_response",
