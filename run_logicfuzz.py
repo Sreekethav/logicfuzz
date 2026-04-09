@@ -106,17 +106,9 @@ def run_experiments(benchmark: benchmarklib.Benchmark, args) -> Result:
   try:
     work_dirs = WorkDirs(os.path.join(args.work_dir, f'output-{benchmark.id}'))
     args.work_dirs = work_dirs
-    model = models.LLM.setup(
-        ai_binary=args.ai_binary,
-        name=args.model,
-        max_tokens=MAX_TOKENS,
-        num_samples=args.num_samples,
-        temperature=args.temperature,
-        temperature_list=args.temperature_list,
-    )
 
     result = run_single_fuzz.run(benchmark=benchmark,
-                                    model=model,
+                                    model_name=args.model,
                                     args=args,
                                     work_dirs=work_dirs)
     return Result(benchmark, result)

@@ -215,19 +215,20 @@ def execution_node(state: FuzzingWorkflowState, config: RunnableConfig) -> Dict[
         raise ValueError("No fuzz target source available for execution")
     
     # Set up builder runner
-    if args.cloud_experiment_name:
+    cloud_experiment_name = getattr(args, 'cloud_experiment_name', None)
+    if cloud_experiment_name:
         builder_runner = builder_runner_lib.CloudBuilderRunner(
             benchmark=benchmark,
             work_dirs=work_dirs,
-            run_timeout=args.run_timeout,
-            experiment_name=args.cloud_experiment_name,
-            experiment_bucket=args.cloud_experiment_bucket,
+            run_timeout=getattr(args, 'run_timeout', 300),
+            experiment_name=cloud_experiment_name,
+            experiment_bucket=getattr(args, 'cloud_experiment_bucket', None),
         )
     else:
         builder_runner = builder_runner_lib.BuilderRunner(
             benchmark=benchmark,
             work_dirs=work_dirs,
-            run_timeout=args.run_timeout,
+            run_timeout=getattr(args, 'run_timeout', 300),
         )
     
     # Set up evaluator
@@ -271,7 +272,7 @@ def execution_node(state: FuzzingWorkflowState, config: RunnableConfig) -> Dict[
             'Execution',
             'ofg',
             benchmark.project,
-        ] if args.cloud_experiment_name else None,
+        ] if cloud_experiment_name else None,
         trial=trial
     )
     
@@ -523,7 +524,7 @@ def build_node(state: FuzzingWorkflowState, config: RunnableConfig) -> Dict[str,
     builder_runner = builder_runner_lib.BuilderRunner(
         benchmark=benchmark,
         work_dirs=work_dirs,
-        run_timeout=args.run_timeout,
+        run_timeout=getattr(args, 'run_timeout', 300),
     )
     
     # Set up evaluator
