@@ -1,0 +1,36 @@
+<task>
+Analyze existing fuzz drivers for the {PROJECT_NAME} library and extract reusable patterns.
+</task>
+
+<drivers>
+{DRIVERS_TEXT}
+</drivers>
+
+<instructions>
+Analyze the drivers above and extract:
+
+1. CORE FUNCTIONALITY: What is this library's main purpose? Which APIs are ESSENTIAL to test?
+   List actual API names and explain why they matter for coverage.
+
+2. CODE PATTERNS: Extract the most instructive code snippets showing how fuzz data flows into APIs.
+   PRIORITIZE patterns where fuzz data directly creates objects (e.g., OpenFromMem(data, size)).
+   For transform/conversion APIs, show the complete flow: input creation -> transform -> execution.
+
+Focus on patterns that maximize coverage by exercising core library paths.
+</instructions>
+
+<output_format>
+Respond with EXACTLY these XML tags:
+
+<core_functionality>
+[Library purpose and essential APIs to test - be specific with API names]
+</core_functionality>
+
+<code_patterns>
+[Code snippets organized by category, each with brief explanation of WHY it's effective]
+</code_patterns>
+
+<setup_teardown>
+[Common initialization and cleanup patterns from the drivers]
+</setup_teardown>
+</output_format>

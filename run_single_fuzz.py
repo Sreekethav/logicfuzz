@@ -10,13 +10,13 @@ from multiprocessing import pool
 from typing import List, Optional
 
 import logger
-from agent_graph import FuzzingWorkflow
+from src.workflow import FuzzingWorkflow
 from experiment import builder_runner as builder_runner_lib
 from experiment import evaluator as exp_evaluator
 from experiment import oss_fuzz_checkout, textcov
 from experiment.benchmark import Benchmark
 from experiment.workdir import WorkDirs
-from llm_toolkit import models
+from src.llm import models
 from results import BenchmarkResult, Result, TrialResult
 
 # WARN: Avoid high value for NUM_EVA for local experiments.
@@ -121,26 +121,36 @@ def aggregate_results(target_stats: list[tuple[int, exp_evaluator.Result]],
                           max_coverage_diff_report, all_textcov)
 
 def check_targets(
-    ai_binary: str,
     benchmark: Benchmark,
     work_dirs: WorkDirs,
     generated_targets: List[str],
+    cloud_experiment_name: str = '',
+    cloud_experiment_bucket: str = '',
     run_timeout: int = RUN_TIMEOUT,
-    fixer_model_name: str = models.DefaultModel.name,
+    fixer_model_name: str = models.DEFAULT_MODEL,
 ) -> Optional[AggregatedResult]:
   """Builds all targets in the fixed target directory."""
   target_stats = []
 
-  builder_runner = builder_runner_lib.BuilderRunner(benchmark, work_dirs,
-                                                    run_timeout,
-                                                    fixer_model_name)
+  if cloud_experiment_name:
+    builder_runner = builder_runner_lib.CloudBuilderRunner(
+        benchmark,
+        work_dirs,
+        run_timeout,
+        fixer_model_name,
+        experiment_name=cloud_experiment_name,
+        experiment_bucket=cloud_experiment_bucket,
+    )
+  else:
+    builder_runner = builder_runner_lib.BuilderRunner(benchmark, work_dirs,
+                                                      run_timeout,
+                                                      fixer_model_name)
 
   evaluator = exp_evaluator.Evaluator(builder_runner, benchmark, work_dirs)
 
-  ai_target_pairs = [(ai_binary, target) for target in generated_targets]
   with pool.ThreadPool(NUM_EVA) as p:
     for i, target_stat in enumerate(
-        p.starmap(evaluator.check_target, ai_target_pairs)):
+        p.map(evaluator.check_target, generated_targets)):
       if target_stat is None:
         logging.error('This should never happen: Error evaluating target: %s',
                       generated_targets[i])
@@ -159,48 +169,63 @@ def prepare(oss_fuzz_dir: str) -> None:
   oss_fuzz_checkout.clone_oss_fuzz(oss_fuzz_dir)
   oss_fuzz_checkout.postprocess_oss_fuzz()
 
-def _prepare_shared_data_for_benchmark(benchmark: Benchmark, args: argparse.Namespace) -> dict:
+def _prepare_shared_data_for_benchmark(benchmark: Benchmark, args: argparse.Namespace,
+                                        model_name: str = None) -> dict:
   """
-  Extract shared data that's identical for all trials.
-  
-  This function queries FuzzIntrospector once and returns data that
-  all trials can share, avoiding redundant network I/O and computation.
-  
+  Extract shared data using Liberator project-level modeling.
+
+  This function uses ProjectDriverGenerator to model the entire project,
+  extract all APIs, and generate API sequences for driver generation.
+
   Args:
-      benchmark: Benchmark containing project and function info
+      benchmark: Benchmark containing project info (project-level mode)
       args: Command line arguments
-      
+      model_name: LLM model name for driver knowledge extraction
+
   Returns:
       Dictionary with shared data:
-      - source_code: Function source code from FI
-      - api_context: API context (parameters, types, examples, etc.)
-      - api_dependencies: Dependency graph
+      - project_apis: All APIs extracted from project
+      - api_sequences: API call sequences from grammar
+      - dependency_graph: Type dependency graph
+      - grammar_info: Grammar metadata
       - header_info: Header file information
       - existing_fuzzer_headers: Headers from existing fuzzers
+      - existing_driver_knowledge: Knowledge extracted from existing OSS-Fuzz drivers
   """
-  from agent_graph.data_context import FuzzingContext
-  
+  from src.context.data_context import FuzzingContext
+  from src.llm.adapter import create_llm_adapter
+
   project_name = benchmark.project
-  function_signature = benchmark.function_signature
-  
+
   try:
+    # Get synthesis settings from args if available
+    # Note: Synthesis is always enabled (CBFactory + LLM refinement)
+    num_synthesis_drivers = getattr(args, 'num_synthesis_drivers', 5) if args else 5
+
+    # Create LLM adapter for driver knowledge extraction (optional)
+    llm_client = None
+    if model_name:
+      try:
+        llm_client = create_llm_adapter(model_name)
+        logger.info(f'✅ Created LLM adapter ({model_name}) for driver knowledge extraction', trial=0)
+      except Exception as e:
+        logger.warning(f'⚠️ Could not create LLM adapter: {e}. Driver knowledge extraction will be limited.', trial=0)
+
     context = FuzzingContext.prepare(
       project_name=project_name,
-      function_signature=function_signature,
-      logger_instance=None  # Use standard logging - no trial concept here
+      benchmark=benchmark,  # Pass benchmark for Clang/LLVM extraction
+      logger_instance=None,  # Use standard logging - no trial concept here
+      num_synthesis_drivers=num_synthesis_drivers,
+      llm_client=llm_client  # Pass LLM for driver knowledge extraction
     )
     return context.to_dict()
   except (ValueError, RuntimeError) as e:
     # Re-raise with clear message - caller decides how to handle
-    logger.error(f'❌ Failed to prepare fuzzing context: {e}', trial=0)
+    logger.error(f'❌ Failed to prepare project-level fuzzing context: {e}', trial=0)
     raise
 
 
-# Removed: _extract_existing_fuzzer_headers_helper
-# Now handled inside FuzzingContext.prepare()
-
-
-def _fuzzing_pipeline(benchmark: Benchmark, model: models.LLM,
+def _fuzzing_pipeline(benchmark: Benchmark, model_name: str,
                       args: argparse.Namespace, work_dirs: WorkDirs,
                       trial: int, shared_data: dict = None) -> TrialResult:
   """Runs the LangGraph-based fuzzing workflow for one trial."""
@@ -229,7 +254,7 @@ def _fuzzing_pipeline(benchmark: Benchmark, model: models.LLM,
     
     # Create and run the LangGraph workflow
     trial_logger.info('🔧 Creating FuzzingWorkflow instance...')
-    workflow = FuzzingWorkflow(model, args, shared_data=shared_data)
+    workflow = FuzzingWorkflow(model_name, args, shared_data=shared_data)
     trial_logger.info('✅ FuzzingWorkflow instance created')
     
     # Run the full supervisor-based workflow
@@ -262,7 +287,7 @@ def _fuzzing_pipeline(benchmark: Benchmark, model: models.LLM,
     
     # Convert LangGraph state back to legacy result format using StateAdapter
     trial_logger.info('🔄 Converting state to result_history...')
-    from agent_graph.adapters import StateAdapter
+    from src.workflow.adapters import StateAdapter
     
     # Use StateAdapter to properly convert state to result_history
     # This creates a complete result_history with BaseResult, BuildResult, RunResult, etc.
@@ -362,7 +387,7 @@ def _fuzzing_pipeline(benchmark: Benchmark, model: models.LLM,
     # Note: signal.alarm(0) removed because we disabled signal-based timeout
     trial_logger.info('⏰ Trial cleanup complete')
 
-def _fuzzing_pipelines(benchmark: Benchmark, model: models.LLM,
+def _fuzzing_pipelines(benchmark: Benchmark, model_name: str,
                        args: argparse.Namespace,
                        work_dirs: WorkDirs) -> BenchmarkResult:
   """Runs all trial experiments in their pipelines."""
@@ -379,7 +404,7 @@ def _fuzzing_pipelines(benchmark: Benchmark, model: models.LLM,
   shared_data_start = time.time()
   
   try:
-    shared_data = _prepare_shared_data_for_benchmark(benchmark, args)
+    shared_data = _prepare_shared_data_for_benchmark(benchmark, args, model_name)
   except ValueError as e:
     # Data preparation failed due to bad input - this is terminal
     logger.error(
@@ -423,7 +448,7 @@ def _fuzzing_pipelines(benchmark: Benchmark, model: models.LLM,
     
     # Initialize thread-local storage in each worker before processing
     # IMPORTANT: Pass shared_data to each trial
-    task_args = [(benchmark, model, args, work_dirs, trial, shared_data)
+    task_args = [(benchmark, model_name, args, work_dirs, trial, shared_data)
                  for trial in range(1, args.num_samples + 1)]
     logger.info(f'📍 [_fuzzing_pipelines] Starting {len(task_args)} trial(s) via starmap...', trial=0)
     
@@ -453,10 +478,10 @@ def _fuzzing_pipelines(benchmark: Benchmark, model: models.LLM,
   logger.info('📍 [_fuzzing_pipelines] BenchmarkResult created, returning', trial=0)
   return result
 
-def run(benchmark: Benchmark, model: models.LLM, args: argparse.Namespace,
+def run(benchmark: Benchmark, model_name: str, args: argparse.Namespace,
         work_dirs: WorkDirs) -> Optional[AggregatedResult]:
   """Generates code via LLM, and evaluates them."""
-  model.cloud_setup()
+  # Note: cloud_setup() removed - LangChain handles initialization internally
 
   # Save the benchmark in the WorkDir base. This is saved to the working
   # directory, and should not be deleted in future executions. As such,
@@ -466,4 +491,4 @@ def run(benchmark: Benchmark, model: models.LLM, args: argparse.Namespace,
                     out_basename='benchmark.yaml')
 
   return AggregatedResult.from_benchmark_result(
-      _fuzzing_pipelines(benchmark, model, args, work_dirs))
+      _fuzzing_pipelines(benchmark, model_name, args, work_dirs))

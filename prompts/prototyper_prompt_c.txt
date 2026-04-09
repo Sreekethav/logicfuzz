@@ -1,0 +1,116 @@
+<task>
+Generate a fuzz driver for C project: {PROJECT_NAME}
+</task>
+
+<api_sequences>
+The following API call sequences have been validated by lifecycle analysis.
+Use these as reference, but PRIORITIZE Parser APIs for maximum fuzzing value.
+</api_sequences>
+
+<project_analysis>
+{SRS_SPECIFICATION}
+</project_analysis>
+
+<additional_context>
+{ADDITIONAL_CONTEXT}
+</additional_context>
+
+<critical_rule>
+API QUANTITY OVER INPUT COMPLEXITY
+
+THE #1 RULE: Call MORE library APIs, not write FANCY input generators.
+
+Coverage comes from exercising library code, not from your helper functions.
+Every line of helper code is a line NOT calling library APIs.
+</critical_rule>
+
+<bad_example>
+DO NOT DO THIS - too much helper code, only 1 API call:
+
+```c
+// 150 lines of helper functions...
+static void AppendStr(...) { ... }      // 20 lines - WASTED
+static void AppendInt(...) { ... }      // 10 lines - WASTED
+static char* MakeFormat(...) { ... }    // 50 lines - WASTED
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  char* input = MakeFormat(data, size);  // Complex input
+  library_parse(input);                   // ONLY 1 API CALL!
+  free(input);
+  return 0;
+}
+// Result: 150 lines of YOUR code, 1 line of LIBRARY code = LOW COVERAGE
+```
+</bad_example>
+
+<good_example>
+DO THIS - simple input, many API calls:
+
+```c
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include "library_header.h"
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  if (size < 4) return 0;
+
+  // Simple: pass fuzzer data directly to parser
+  void* ctx = lib_parse(data, size);     // Parser API
+  if (!ctx) return 0;
+
+  lib_validate(ctx);                      // +1 API
+  lib_get_count(ctx);                     // +1 API
+  lib_get_item(ctx, 0);                   // +1 API
+  lib_iterate(ctx);                       // +1 API
+  lib_serialize(ctx, NULL, 0);            // +1 API
+
+  lib_free(ctx);
+  return 0;
+}
+// Result: 15 lines total, 6 library API calls = HIGH COVERAGE
+```
+</good_example>
+
+<code_budget>
+STRICTLY ENFORCED:
+- Input generation: MAX 15 lines (>30 lines = BAD)
+- Helper functions: MAX 10 lines total (>20 lines = BAD)
+- Library API calls: MIN 5 different APIs (<3 APIs = BAD)
+</code_budget>
+
+<c_project_rules>
+IMPORTANT: This is a C project. DO NOT use C++ features:
+- NO FuzzedDataProvider (it's a C++ class)
+- NO std::string, std::vector, or any STL
+- NO extern "C" (already C code)
+- Use raw data/size parameters directly
+</c_project_rules>
+
+<varlen_handling>
+Pass data with its size:
+```c
+lib_process(data, size);  // size matches data length
+```
+</varlen_handling>
+
+<callback_handling>
+Use minimal stubs:
+```c
+static void my_callback(void* ctx, int status) { /* empty */ }
+lib_register_callback(ctx, my_callback, NULL);
+```
+</callback_handling>
+
+<implementation_steps>
+1. Headers: Include stdint.h, stddef.h, string.h, stdlib.h + library headers
+2. Init: Call create/init APIs first, check returns
+3. Use: Call 5+ library APIs with simple fuzzer-derived inputs
+4. Cleanup: Free in reverse order, free any malloc'd buffers
+</implementation_steps>
+
+<output_format>
+First provide a brief conclusion (1-2 sentences: which APIs called, why).
+Then output your complete fuzz driver code inside <fuzz_target> tags.
+The code should be 30-60 lines total, NOT 150+ lines.
+</output_format>

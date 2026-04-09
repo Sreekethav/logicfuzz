@@ -1,107 +1,117 @@
-Generate fuzz target for {FUNCTION_NAME} ({PROJECT_NAME})
+<task>
+Generate a fuzz driver for C++ project: {PROJECT_NAME}
+</task>
 
-SIGNATURE: {FUNCTION_SIGNATURE}
+<api_sequences>
+The following API call sequences have been validated by lifecycle analysis.
+Use these as reference, but PRIORITIZE Parser APIs for maximum fuzzing value.
+</api_sequences>
 
-SRS SPECIFICATION:
+<project_analysis>
 {SRS_SPECIFICATION}
+</project_analysis>
 
-REFERENCE SKELETON (use these headers):
-{SKELETON_CODE}
-
-REQUIREMENTS:
-1. MUST call {FUNCTION_NAME} (exact name)
-2. Use skeleton headers only (filtered, safe)
-3. Implement [MANDATORY] items from SRS
-4. Follow API dependencies (init → use → cleanup)
-
+<additional_context>
 {ADDITIONAL_CONTEXT}
+</additional_context>
 
-PARAMETER STRATEGY (from SRS):
+<critical_rule>
+API QUANTITY OVER INPUT COMPLEXITY
 
-DEFAULT: FuzzedDataProvider for 2+ parameters
+THE #1 RULE: Call MORE library APIs, not write FANCY input generators.
+
+Coverage comes from exercising library code, not from your helper functions.
+Every line of helper code is a line NOT calling library APIs.
+</critical_rule>
+
+<bad_example>
+DO NOT DO THIS - too much helper code, only 1 API call:
 
 ```cpp
+// 150 lines of helper functions...
+static void AppendStr(...) { ... }      // 20 lines - WASTED
+static void AppendInt(...) { ... }      // 10 lines - WASTED
+static std::string MakeJson(...) { ... } // 50 lines - WASTED
+static std::string MakeXML(...) { ... }  // 40 lines - WASTED
+
+extern "C" int LLVMFuzzerTestOneInput(...) {
+  std::string input = MakeJson(fdp, 5);  // Complex input
+  library_parse(input.c_str());          // ONLY 1 API CALL!
+  return 0;
+}
+// Result: 150 lines of YOUR code, 1 line of LIBRARY code = LOW COVERAGE
+```
+</bad_example>
+
+<good_example>
+DO THIS - simple input, many API calls:
+
+```cpp
+#include <stdint.h>
 #include <fuzzer/FuzzedDataProvider.h>
+#include "library_header.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   FuzzedDataProvider fdp(data, size);
-  
-  // Split input into varied parameters
-  std::string p1 = fdp.ConsumeRandomLengthString(256);
-  int p2 = fdp.ConsumeIntegral<int>();
-  
-  {FUNCTION_NAME}(p1.c_str(), p2);
+
+  // Simple input - just get bytes from fuzzer
+  std::string input = fdp.ConsumeRandomLengthString(4096);
+
+  // Call MANY library APIs
+  void* ctx = lib_create();
+  if (!ctx) return 0;
+
+  lib_parse(ctx, input.data(), input.size());  // Parser API
+  lib_validate(ctx);                            // +1 API
+  lib_get_count(ctx);                           // +1 API
+  lib_get_item(ctx, 0);                         // +1 API
+  lib_iterate(ctx);                             // +1 API
+  lib_serialize(ctx);                           // +1 API
+
+  lib_destroy(ctx);
   return 0;
 }
+// Result: 20 lines total, 7 library API calls = HIGH COVERAGE
 ```
+</good_example>
 
-DIRECT_FUZZ: Single buffer function (pass-through)
+<code_budget>
+STRICTLY ENFORCED:
+- Input generation: MAX 15 lines (>30 lines = BAD)
+- Helper functions: MAX 10 lines total (>20 lines = BAD)
+- Library API calls: MIN 5 different APIs (<3 APIs = BAD)
+</code_budget>
+
+<cpp_notes>
+- Use `extern "C"` for LLVMFuzzerTestOneInput declaration
+- If the target library is written in C, wrap its headers in `extern "C" { }`
+</cpp_notes>
+
+<varlen_handling>
+When buffer and size are related:
 ```cpp
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-  {FUNCTION_NAME}(data, size);
-  return 0;
-}
+std::string buf = fdp.ConsumeRandomLengthString(4096);
+api_func(buf.data(), buf.size());  // size matches buffer
 ```
+</varlen_handling>
 
-CONSTRAIN: Bounded values
+<callback_handling>
+Use minimal stubs:
 ```cpp
-FuzzedDataProvider fdp(data, size);
-int port = fdp.ConsumeIntegralInRange<int>(1, 65535);
-{FUNCTION_NAME}(port);
+void my_callback(void* ctx, int status) { /* empty */ }
+api_register_callback(ctx, my_callback, nullptr);
 ```
+</callback_handling>
 
-CONSTRUCT: Struct/object parameters
-```cpp
-FuzzedDataProvider fdp(data, size);
-struct Config cfg = {0};
-cfg.field1 = fdp.ConsumeIntegral<int>();
-cfg.field2 = fdp.ConsumeRandomLengthString(256).c_str();
-{FUNCTION_NAME}(&cfg);
-```
+<implementation_steps>
+1. Headers: Use ONLY skeleton headers, filter internal/*
+2. Init: Call create/init APIs first, check returns
+3. Use: Call 5+ library APIs with simple fuzzer-derived inputs
+4. Cleanup: Free in reverse order
+</implementation_steps>
 
-FIX: API requires fixed value (document rationale in SRS)
-
-IMPLEMENTATION STEPS:
-
-1. Headers:
-   - Use ONLY reference skeleton headers
-   - Filter out internal/*, detail/*, private/*
-
-2. Preconditions:
-   - Check PRE-* conditions from SRS
-   - Return 0 if preconditions cannot be satisfied
-
-3. Parameter construction:
-   - Follow SRS strategy per parameter
-   - Use FuzzedDataProvider for multi-param (default)
-   - For structs: breakdown fields per SRS field_breakdown
-
-4. API lifecycle:
-   - Call init/setup functions if required
-   - Call {FUNCTION_NAME}
-   - Check POST-* conditions if specified
-   - Cleanup in reverse order (destroy → close → cleanup)
-
-5. Multi-API fuzzing (if API dependency analysis provided):
-   - Call ALL APIs in recommended order
-   - Vary parameters for EACH call
-   - Test different combinations
-   - Cleanup in reverse order
-
-EXCEPTIONS TO FuzzedDataProvider:
-- Single buffer functions (DIRECT_FUZZ)
-- API constraints requiring fixed values (must be documented in SRS)
-
-OUTPUT FORMAT:
-
-<conclusion>Skeleton used, [MANDATORY] implemented, {FUNCTION_NAME} called</conclusion>
-<fuzz_target>[Complete code with LLVMFuzzerTestOneInput]</fuzz_target>
-<build_script>[Only if needed, otherwise omit]</build_script>
-
-CRITICAL REQUIREMENTS:
-- Follow exact XML format above
-- Include complete, compilable code in <fuzz_target> - NO placeholders
-- Confirm {FUNCTION_NAME} is called
-- No extra commentary outside XML tags
-- DO NOT use HTML entities (e.g. &lt; &gt; &amp;) or markdown in code, USE literal characters (< > &)
-
+<output_format>
+First provide a brief conclusion (1-2 sentences: which APIs called, why).
+Then output your complete fuzz driver code inside <fuzz_target> tags.
+The code should be 30-60 lines total, NOT 150+ lines.
+</output_format>

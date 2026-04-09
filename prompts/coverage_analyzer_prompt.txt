@@ -1,141 +1,100 @@
+<task>
 Analyze the following fuzz target to determine why it has low coverage and how to improve it.
+</task>
 
-**Project**: {PROJECT}
-**Function Under Test**: {FUNCTION_SIGNATURE}
-**Language**: {LANGUAGE}
-**Project Language**: {PROJECT_LANGUAGE}
-**Project Directory**: {PROJECT_DIR}
+<project_info>
+Project: {PROJECT}
+Language: {LANGUAGE}
+</project_info>
 
-**Current Fuzz Target**:
+<current_fuzz_target>
 ```
 {FUZZ_TARGET}
 ```
+</current_fuzz_target>
 
-**Fuzzing Log**:
+<fuzzing_log>
 {FUZZING_LOG}
+</fuzzing_log>
 
-**Function Requirements**:
+<api_sequence_info>
 {FUNCTION_REQUIREMENTS}
+</api_sequence_info>
 
+<additional_context>
 {ADDITIONAL_CONTEXT}
+</additional_context>
 
-**Your Task**:
-Investigate why coverage is low, identify uncovered code blocks reachable from the target function, and determine how to enhance the fuzz target. Use bash commands to examine the project source code when needed.
+<analysis_steps>
 
-**Analysis Steps**:
+<step1>
+Examine Current Coverage:
+- Review the fuzzing log to understand current coverage levels
+- Identify which code blocks or APIs are NOT being executed
+- Determine which branches are always taking the same path
+</step1>
 
-1. **Examine Current Coverage**:
-   - Review the fuzzing log to understand current coverage levels
-   - Identify which code blocks or functions are NOT being executed
-   - Determine which branches are always taking the same path
+<step2>
+Analyze the Fuzz Target:
+- How are parameters extracted from fuzzer input?
+- What values are used (constants, naive values, processed input)?
+- Is the approach too narrow (single code path)?
+- Are all APIs in the sequence being called?
+</step2>
 
-2. **Analyze the Fuzz Target** (use bash to read source if needed):
-   - How are parameters extracted from fuzzer input?
-   - What values are used (constants, naive values, processed input)?
-   - Is the approach too narrow (single code path)?
-   - Are inputs properly preprocessed?
+<step3>
+Identify Coverage Gaps:
+- Which API calls are never reached?
+- Which conditionals or branches are never taken?
+- What edge cases are not being tested?
+- Which error paths are never executed?
+</step3>
 
-3. **Identify Coverage Gaps** (use bash to examine uncovered code):
-   - Which conditionals or branches are never taken?
-   - Which functions should be called but aren't?
-   - What edge cases are not being tested?
-   - Which error paths are never executed?
+<step4>
+Determine Root Causes:
+- Why does the fuzz target exercise only one narrow code path?
+- Is input too naive or unprocessed?
+- Are there missing setup/initialization calls?
+- Is parameter variation insufficient?
+</step4>
 
-4. **Determine Root Causes**:
-   - Why does the fuzz target exercise only one narrow code path?
-   - Is input too naive or unprocessed?
-   - Are there missing preparation or setup functions?
-   - Is parameter variation insufficient?
+<step5>
+Develop Improvement Solutions:
+- Fine-grained Input Preprocessing: Split raw input into multiple meaningful parameters
+- Test Edge Cases: Empty inputs, very short/long inputs, boundary values
+- Vary API Parameters: Extract varied values from fuzz input (use language-appropriate methods)
+- Try Different Sequences: If current sequence saturated, try different API sequence
+</step5>
 
-5. **Develop Improvement Solutions**:
-   - **Fine-grained Input Preprocessing**: Split raw input into multiple meaningful parameters
-   - **Test Edge Cases**: Empty inputs, very short/long inputs, boundary values
-   - **Call Preparation Functions**: Setup functions needed before the target function
-   - **Improve Initialization**: Properly create complex data structures
-   - **Increase Variation**: Test different parameter combinations
+</analysis_steps>
 
-6. **Validate Against Requirements**:
-   - Ensure suggested changes DO NOT violate function requirements
-   - Verify suggestions will actually increase coverage
-
-**Output Format**:
-
-Use these XML tags to provide your final analysis:
+<output_format>
+Provide your analysis using these XML tags:
 
 <conclusion>True or False</conclusion>
 
 <insights>
-## Coverage Assessment
-[Current coverage level and what's missing]
+Coverage Assessment: [Current coverage level and what's missing]
 
-## Root Cause Analysis
-[Why the fuzz target achieves low coverage, with specific evidence]
-
-Example:
-The low coverage stems from:
-* **Single Argument Limitation**: Fuzz target provides naive/unprocessed arguments (e.g., NULL, constant strings)
-* **Lack of Input Variation**: Input used verbatim without preprocessing
-* **Untested Functions**: Missing setup/initialization function calls
-* **Missing Edge Cases**: No testing of boundary conditions
+Root Cause Analysis: [Why the fuzz target achieves low coverage, with specific evidence]
+- Fixed Parameters: Using constants instead of fuzzed values
+- Lack of Input Variation: Input used verbatim without preprocessing
+- Missing API Calls: Not all APIs in sequence are being called
+- Missing Edge Cases: No testing of boundary conditions
 </insights>
 
 <suggestions>
-## Improvement Recommendations
+Improvement Recommendations with specific code examples:
 
-Provide specific, actionable suggestions with code examples:
-
-1. **Fine-grained Input Preprocessing**:
-```cpp
-// Before: naive approach
-target_function(NULL);
-
-// After: proper preprocessing
-if (size < 4) return 0;
-int param1 = data[0];
-const uint8_t* param2 = &data[1];
-size_t param2_len = size - 1;
-target_function(param1, param2, param2_len);
-```
-
-2. **Call Preparation Functions**:
-```cpp
-context_t* ctx = create_context();
-init_context(ctx, config_value);
-target_function(ctx, input);
-cleanup_context(ctx);
-```
-
-3. **Test Edge Cases**:
-```cpp
-// Test empty, short, and max size inputs
-target_function(NULL, 0);
-if (size >= 1) target_function(data, 1);
-if (size >= MAX_SIZE) target_function(data, MAX_SIZE);
-```
-
-4. **Improve Data Structure Initialization** (for C++):
-```cpp
-FuzzedDataProvider fdp(data, size);
-struct param_t param;
-param.field1 = fdp.ConsumeIntegral<int>();
-param.field2 = fdp.ConsumeIntegral<uint32_t>();
-target_function(&param);
-```
-
-[Optional: Provide complete revised fuzz target if changes are extensive]
+1. Vary All Parameters: Extract different values from fuzz input instead of using constants
+2. Call All APIs in Sequence: Don't skip any API in the validated sequence
+3. Test Edge Cases: Empty, minimal, and boundary inputs
 </suggestions>
+</output_format>
 
-**Critical Requirements**:
-- Use `<conclusion>True</conclusion>` or `<conclusion>False</conclusion>` to indicate if improvement is needed
-- Provide detailed analysis with source code evidence inside `<insights>` tags
-- Provide specific recommendations with code examples inside `<suggestions>` tags
-- Ensure suggestions DO NOT violate function requirements
-- Use bash commands to investigate source code when needed
-
-OUTPUT DISCIPLINE:
-Follow exact XML format: <conclusion>, <insights>, <suggestions>
-Keep <insights> concise (2-3 key findings max)
-Include code examples in suggestions
-No extra commentary outside XML tags
-
-
+<requirements>
+- Use <conclusion>True</conclusion> if improvement is needed, <conclusion>False</conclusion> otherwise
+- Keep <insights> concise (2-3 key findings max)
+- Include code examples in suggestions
+- No extra commentary outside XML tags
+</requirements>
