@@ -1,6 +1,7 @@
 results/
 results-*/
 oss-fuzz/
+fuzz-introspector/
 oss-fuzz-data/
 benchmark-sets/split_benchmarks/
 benchmark-sets/generated-benchmark-*
