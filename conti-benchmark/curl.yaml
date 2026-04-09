@@ -1,19 +1,10 @@
-"functions":
-- "name": "curl_multi_socket_action"
-  "params":
-  - "name": "m"
-    "type": "CURLM*"
-  - "name": "s"
-    "type": "curl_socket_t"
-  - "name": "ev_bitmask"
-    "type": "int"
-  - "name": "running_handles"
-    "type": "int*"
-  "return_type": "CURLMcode"
-  "signature": |-
-    CURLMcode curl_multi_socket_action(CURLM *m, curl_socket_t s,
-                                       int ev_bitmask, int *running_handles)
-"language": "c++"
+# curl - Project-level configuration
+# Uses automatic API extraction - no function specification required
+
 "project": "curl"
-"target_name": "fuzz_url"
+"language": "c++"
 "target_path": "/src/curl_fuzzer/fuzz_url.cc"
+"target_name": "fuzz_url"
+
+# Note: No 'functions' section needed in project-level mode
+# APIs will be automatically extracted from the project via Clang/LLVM

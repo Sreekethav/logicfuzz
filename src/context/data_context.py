@@ -87,6 +87,11 @@ class FuzzingContext:
     # Final ranking and selection of top-k sequences by coverage potential
     coverage_ranking: Dict[str, Any] = field(default_factory=dict)
 
+    # === Documentation Knowledge (RAG-based retrieval) ===
+    # Contains library purpose, function documentation, and usage examples
+    # retrieved from project documentation via semantic search
+    document_knowledge: Dict[str, Any] = field(default_factory=dict)
+
     # === Metadata ===
     preparation_time: float = 0.0
 
@@ -233,7 +238,8 @@ class FuzzingContext:
                 use_cache: bool = True,
                 num_synthesis_drivers: int = 5,
                 llm_client: Any = None,
-                project_dir: str = None) -> 'FuzzingContext':
+                project_dir: str = None,
+                document_paths: List[str] = None) -> 'FuzzingContext':
         """
         Prepare all fuzzing data using Liberator project-level modeling.
 
@@ -255,6 +261,7 @@ class FuzzingContext:
             num_synthesis_drivers: Number of drivers to synthesize with CBFactory (default: 5)
             llm_client: Optional LLM client for extracting knowledge from existing drivers
             project_dir: Optional project source directory for local fuzz driver search
+            document_paths: Optional list of paths to documentation files/directories for RAG retrieval
 
         Returns:
             Fully initialized FuzzingContext with project-level API data
@@ -307,10 +314,44 @@ class FuzzingContext:
                         f"Driver knowledge extraction failed (non-critical): {e}"
                     )
 
-                # Create new context with driver knowledge (FuzzingContext is frozen)
+                # Load document knowledge if document_paths provided
+                document_knowledge = {}
+                if document_paths:
+                    log.info('  📖 Loading documentation knowledge for RAG retrieval...')
+                    try:
+                        from src.context.doc_knowledge import create_knowledge_manager
+
+                        persist_dir = f"./results/{project_name}/doc_knowledge"
+                        doc_manager = create_knowledge_manager(
+                            project_name=project_name,
+                            document_paths=document_paths,
+                            persist_dir=persist_dir,
+                            logger_instance=log
+                        )
+
+                        library_purpose = doc_manager.retrieve_library_purpose()
+                        api_names = [api['function_name'] for api in cached.project_apis[:50]]
+                        func_docs = doc_manager.get_function_documentation(api_names)
+
+                        document_knowledge = {
+                            'library_purpose': library_purpose,
+                            'function_docs': {
+                                name: [{'content': e.content, 'source': e.source} for e in excerpts]
+                                for name, excerpts in func_docs.items()
+                            },
+                            'indexed_paths': document_paths,
+                            'persist_dir': persist_dir,
+                        }
+                        num_func_docs = len([f for f in func_docs.values() if f])
+                        log.info(f'   ✅ Loaded documentation: {num_func_docs} functions with docs')
+                    except Exception as e:
+                        log.warning(f"Documentation loading failed (non-critical): {e}")
+
+                # Create new context with driver knowledge and document knowledge
                 return replace(
                     cached,
-                    existing_driver_knowledge=existing_driver_knowledge)
+                    existing_driver_knowledge=existing_driver_knowledge,
+                    document_knowledge=document_knowledge)
             log.info(
                 f'📦 No valid cache found, running full static analysis for {project_name}'
             )
@@ -974,6 +1015,52 @@ class FuzzingContext:
                 f"Driver knowledge extraction failed (non-critical): {e}")
             existing_driver_knowledge = {}
 
+        # === Step 13: Load document knowledge (optional, for RAG retrieval) ===
+        document_knowledge = {}
+        if document_paths:
+            log.info('  13/13 Loading documentation knowledge for RAG retrieval...')
+            try:
+                from src.context.doc_knowledge import create_knowledge_manager
+
+                # Create persist directory for the vector database
+                persist_dir = f"./results/{project_name}/doc_knowledge"
+
+                # Create knowledge manager and index documents
+                doc_manager = create_knowledge_manager(
+                    project_name=project_name,
+                    document_paths=document_paths,
+                    persist_dir=persist_dir,
+                    logger_instance=log
+                )
+
+                # Retrieve library purpose
+                library_purpose = doc_manager.retrieve_library_purpose()
+
+                # Get function-specific documentation for APIs
+                api_names = [api['function_name'] for api in project_apis[:50]]  # Limit to first 50
+                func_docs = doc_manager.get_function_documentation(api_names)
+
+                # Store knowledge
+                document_knowledge = {
+                    'library_purpose': library_purpose,
+                    'function_docs': {
+                        name: [{'content': e.content, 'source': e.source} for e in excerpts]
+                        for name, excerpts in func_docs.items()
+                    },
+                    'indexed_paths': document_paths,
+                    'persist_dir': persist_dir,
+                }
+
+                num_func_docs = len([f for f in func_docs.values() if f])
+                log.info(
+                    f'   ✅ Loaded documentation: {num_func_docs} functions with docs'
+                )
+            except Exception as e:
+                log.warning(f"Documentation loading failed (non-critical): {e}")
+                document_knowledge = {}
+        else:
+            log.debug('   ℹ️ No document_paths provided, skipping documentation loading')
+
         # === Create context ===
         elapsed = time.time() - start_time
         log.info(f'✅ Project-level fuzzing context prepared in {elapsed:.2f}s')
@@ -1016,6 +1103,7 @@ class FuzzingContext:
                    lifecycle_analysis=lifecycle_analysis_result,
                    state_machine_analysis=state_machine_analysis_result,
                    coverage_ranking=coverage_ranking_result,
+                   document_knowledge=document_knowledge,
                    preparation_time=elapsed)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1037,6 +1125,7 @@ class FuzzingContext:
             'lifecycle_analysis': self.lifecycle_analysis,
             'state_machine_analysis': self.state_machine_analysis,
             'coverage_ranking': self.coverage_ranking,
+            'document_knowledge': self.document_knowledge,
             'preparation_time': self.preparation_time,
         }
 

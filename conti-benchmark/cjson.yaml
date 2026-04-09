@@ -1,11 +1,10 @@
-"functions":
-- "name": "cJSON_Parse"
-  "params":
-  - "name": "value"
-    "type": "const char *"
-  "return_type": "cJSON *"
-  "signature": "cJSON * cJSON_Parse(const char *)"
-"language": "c"
+# cJSON - Project-level configuration
+# Uses automatic API extraction - no function specification required
+
 "project": "cjson"
-"target_name": "cjson_read_fuzzer"
+"language": "c"
 "target_path": "/src/cjson/fuzzing/cjson_read_fuzzer.c"
+"target_name": "cjson_read_fuzzer"
+
+# Note: No 'functions' section needed in project-level mode
+# APIs will be automatically extracted from the project via Clang/LLVM

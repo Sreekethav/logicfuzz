@@ -1,0 +1,16 @@
+# PSM (Power Sequence Manager) - Project-level configuration
+# Uses automatic API extraction - no function specification required
+
+"project": "psm"
+"language": "c++"
+"target_path": "/src/psm/fuzz_target.cpp"
+"target_name": "psm_fuzzer"
+
+# Document paths for RAG-based knowledge retrieval
+# Supports: directories, files, zip archives
+# Formats: .h (Doxygen), .md, .txt, .html, .pdf, .rst, .adoc
+"document_paths":
+  - "doc/psm_doc.zip"
+
+# Note: No 'functions' section needed in project-level mode
+# APIs will be automatically extracted from the project via Clang/LLVM

@@ -254,6 +254,7 @@ class LangGraphPrototyper(LangGraphAgent, ToolCallingMixin):
         existing_driver_knowledge = context.get('existing_driver_knowledge',
                                                 {})
         header_info = context.get('header_info', {})
+        document_knowledge = context.get('document_knowledge', {})
 
         # Get target path info for include path calculation
         target_path = benchmark.get('target_path', '')
@@ -317,6 +318,14 @@ class LangGraphPrototyper(LangGraphAgent, ToolCallingMixin):
             target_path, existing_fuzzer_headers)
         driver_knowledge_text = self._format_driver_knowledge(
             existing_driver_knowledge)
+        document_knowledge_text = self._format_document_knowledge(
+            document_knowledge, api_sequences)
+        if document_knowledge_text:
+            logger.info(
+                f'Including documentation knowledge in prompt '
+                f'(library_purpose: {bool(document_knowledge.get("library_purpose"))}, '
+                f'function_docs: {len(document_knowledge.get("function_docs", {}))} APIs)',
+                trial=self.trial)
 
         # === Synthesis mode: Format CBFactory base driver for LLM refinement ===
         synthesis_base_text = ""
@@ -426,6 +435,7 @@ Before writing any code, think about:
 {skeleton_text}
 </skeleton_drivers>
 {driver_knowledge_text}
+{document_knowledge_text}
 {synthesis_base_text}
 </reference_information>"""
 
@@ -1256,6 +1266,73 @@ Output your fuzz driver code inside <fuzz_target> tags.
 
         # No skeleton available
         return 'freeform'
+
+    def _format_document_knowledge(self, document_knowledge: Dict[str, Any],
+                                     api_sequences: List[List[str]]) -> str:
+        """Format documentation knowledge for the prompt.
+
+        Includes library purpose and function-specific documentation excerpts
+        retrieved via RAG from project documentation.
+        """
+        if not document_knowledge:
+            return ""
+
+        library_purpose = document_knowledge.get('library_purpose', '')
+        function_docs = document_knowledge.get('function_docs', {})
+
+        if not library_purpose and not function_docs:
+            return ""
+
+        lines = ["<documentation_knowledge>"]
+        lines.append("**Knowledge extracted from project documentation via RAG:**")
+        lines.append("")
+
+        if library_purpose:
+            lines.append("<library_overview>")
+            # Truncate if too long
+            if len(library_purpose) > 500:
+                lines.append(library_purpose[:500] + "...")
+            else:
+                lines.append(library_purpose)
+            lines.append("</library_overview>")
+            lines.append("")
+
+        # Get APIs from sequences for targeted documentation
+        if function_docs:
+            sequence_apis = set()
+            for seq in api_sequences[:5]:  # Focus on first few sequences
+                sequence_apis.update(seq)
+
+            # Filter to APIs that appear in sequences
+            relevant_docs = {
+                api: docs for api, docs in function_docs.items()
+                if api in sequence_apis and docs
+            }
+
+            if relevant_docs:
+                lines.append("<function_documentation>")
+                lines.append("**Documentation for APIs in your sequences:**")
+                lines.append("")
+
+                for api_name, excerpts in list(relevant_docs.items())[:8]:
+                    lines.append(f"**{api_name}**:")
+                    for excerpt in excerpts[:2]:  # Limit excerpts per function
+                        content = excerpt.get('content', '')
+                        source = excerpt.get('source', 'unknown')
+                        if len(content) > 300:
+                            content = content[:300] + "..."
+                        lines.append(f"  [{source}]")
+                        lines.append(f"  {content}")
+                        lines.append("")
+
+                lines.append("</function_documentation>")
+
+        lines.append("")
+        lines.append("**Note:** Use this documentation to understand API semantics,")
+        lines.append("parameter constraints, and correct usage patterns.")
+        lines.append("</documentation_knowledge>")
+
+        return "\n".join(lines)
 
     def _format_driver_knowledge(self, driver_knowledge: Dict[str,
                                                               Any]) -> str:

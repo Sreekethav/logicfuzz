@@ -41,7 +41,10 @@ class Benchmark:
         'target_name': benchmarks[0].target_name,
     }
     for benchmark in benchmarks:
-      if benchmark.test_file_path:
+      if benchmark.is_project_level:
+        # Project-level benchmark: no functions or test_files needed
+        continue
+      elif benchmark.test_file_path:
         if 'test_files' not in result:
           result['test_files'] = []
         result['test_files'].append(
@@ -76,8 +79,34 @@ class Benchmark:
     cppify_headers = data.get('cppify_headers', False)
     commit = data.get('commit')
     functions = data.get('functions', [])
+    document_paths = data.get('document_paths', [])  # Documentation paths for RAG
 
     test_files = data.get('test_files', [])
+
+    # Support project-level mode: no functions and no test_files specified
+    # In this mode, APIs are extracted automatically from the project
+    if not functions and not test_files:
+      max_len = os.pathconf('/', 'PC_NAME_MAX') - len('output-')
+      truncated_id = f'{project_name}-project'[:max_len]
+      benchmarks.append(
+          cls(
+              truncated_id.lower(),
+              data['project'],
+              data['language'],
+              '',  # function_signature
+              '',  # function_name
+              '',  # return_type
+              [],  # params
+              data.get('target_path', ''),
+              data.get('target_name', ''),
+              use_project_examples=use_project_examples,
+              cppify_headers=cppify_headers,
+              commit=commit,
+              use_context=use_context,
+              document_paths=document_paths,
+          ))
+      return benchmarks
+
     if test_files:
       for test_file in test_files:
         max_len = os.pathconf('/', 'PC_NAME_MAX') - len('output-')
@@ -98,6 +127,7 @@ class Benchmark:
                 data['target_path'],
                 data.get('target_name', ''),
                 test_file_path=test_file_path,
+                document_paths=document_paths,
             ))
 
     if functions:
@@ -125,7 +155,8 @@ class Benchmark:
                 cppify_headers=cppify_headers,
                 commit=commit,
                 use_context=use_context,
-                function_dict=function))
+                function_dict=function,
+                document_paths=document_paths))
 
     return benchmarks
 
@@ -144,7 +175,8 @@ class Benchmark:
                use_context=False,
                commit=None,
                function_dict: Optional[dict] = None,
-               test_file_path: str = ''):
+               test_file_path: str = '',
+               document_paths: Optional[List[str]] = None):
     self.id = benchmark_id
     self.project = project
     self.language = language
@@ -160,6 +192,7 @@ class Benchmark:
     self.cppify_headers = cppify_headers
     self.commit = commit
     self.test_file_path = test_file_path
+    self.document_paths = document_paths or []  # Documentation paths for RAG retrieval
     # Note: Only C/C++ projects are supported
 
   def __repr__(self):
@@ -208,7 +241,16 @@ class Benchmark:
   def is_cpp_project(self) -> bool:
     """Validates if the project is written in C++."""
     return self.language.lower() == 'c++'
-  
+
+  @property
+  def is_project_level(self) -> bool:
+    """Checks if this is a project-level benchmark (no specific function target).
+
+    Project-level benchmarks use automatic API extraction from the project
+    instead of requiring explicit function specifications in YAML.
+    """
+    return not self.function_signature and not self.function_name and not self.test_file_path
+
   def to_dict(self) -> dict:
     """Convert benchmark to a dictionary for serialization."""
     return {
@@ -227,6 +269,7 @@ class Benchmark:
         'commit': self.commit,
         'test_file_path': self.test_file_path,
         'function_dict': self.function_dict,
+        'document_paths': self.document_paths,
     }
   
   @classmethod
@@ -248,6 +291,7 @@ class Benchmark:
         commit=data.get('commit'),
         function_dict=data.get('function_dict'),
         test_file_path=data.get('test_file_path', ''),
+        document_paths=data.get('document_paths', []),
     )
 
   @property

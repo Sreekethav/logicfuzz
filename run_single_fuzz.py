@@ -211,12 +211,16 @@ def _prepare_shared_data_for_benchmark(benchmark: Benchmark, args: argparse.Name
       except Exception as e:
         logger.warning(f'⚠️ Could not create LLM adapter: {e}. Driver knowledge extraction will be limited.', trial=0)
 
+    # Get document_paths from benchmark for RAG-based documentation retrieval
+    document_paths = getattr(benchmark, 'document_paths', None) or []
+
     context = FuzzingContext.prepare(
       project_name=project_name,
       benchmark=benchmark,  # Pass benchmark for Clang/LLVM extraction
       logger_instance=None,  # Use standard logging - no trial concept here
       num_synthesis_drivers=num_synthesis_drivers,
-      llm_client=llm_client  # Pass LLM for driver knowledge extraction
+      llm_client=llm_client,  # Pass LLM for driver knowledge extraction
+      document_paths=document_paths  # Pass documentation paths for RAG retrieval
     )
     return context.to_dict()
   except (ValueError, RuntimeError) as e:
