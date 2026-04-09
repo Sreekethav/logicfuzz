@@ -200,6 +200,8 @@ docker stop fi-server && docker rm fi-server
 
 For more details on setting up custom projects, see [`docs/NEW_PROJECT_SETUP.md`](NEW_PROJECT_SETUP.md#method-4-using-data-dir-workflow-recommended-for-custom-projects).
 
+For configuring documentation-based knowledge extraction (RAG), see [`docs/KNOWLEDGE_SETUP.md`](KNOWLEDGE_SETUP.md).
+
 ## 5. Verifying outputs
 - Experiment artifacts: `results/output-*/` (on host because of the bind mount).
 - HTML reports: run `python -m report.web -r results -s` to generate and serve reports (then open http://localhost:8012/), or `python -m report.web -r results -o report/html-report/<label>/` to generate static files only.

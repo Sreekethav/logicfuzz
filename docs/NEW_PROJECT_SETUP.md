@@ -620,7 +620,15 @@ docker run --rm \
 "project": "project_name"              # OSS-Fuzz project name (required)
 "target_name": "fuzzer_binary_name"    # Output fuzzer name (optional)
 "target_path": "/src/path/to/fuzzer.c" # Fuzzer source path (required)
+
+# Optional: Documentation paths for knowledge extraction (RAG)
+"document_paths":                      # List of documentation files (optional)
+  - "/src/project/include/api.h"       # Header files with comments
+  - "/src/project/README.md"           # Project documentation
+  - "/src/project/doc/api.md"          # API documentation
 ```
+
+> **Note**: For detailed information on configuring `document_paths` and how LogicFuzz extracts knowledge from documentation, see [`docs/KNOWLEDGE_SETUP.md`](KNOWLEDGE_SETUP.md).
 
 ### Advanced YAML Options
 
@@ -647,6 +655,13 @@ docker run --rm \
 "build_flags":
   - "-DENABLE_FUZZING=ON"
   - "-DCUSTOM_FLAG=1"
+
+# Optional: Documentation paths for knowledge extraction
+# LogicFuzz uses these to extract API semantics, constraints, and patterns
+"document_paths":
+  - "/src/my-project/include/parser.h"    # Header with Doxygen comments
+  - "/src/my-project/README.md"           # Usage examples
+  - "/src/my-project/docs/api.md"         # API documentation
 ```
 
 ---
@@ -857,6 +872,7 @@ python main.py --rebuild
 ### Related Documentation
 
 - [Main README](../README.md) - LogicFuzz overview
+- [Knowledge Extraction Setup](KNOWLEDGE_SETUP.md) - Documentation paths and RAG configuration
 - [Data Preparation](../data_prep/README.md) - Benchmark YAML generation
 
 ### OSS-Fuzz Resources

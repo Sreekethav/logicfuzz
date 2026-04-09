@@ -202,13 +202,14 @@ def _determine_next_action(state: FuzzingWorkflowState) -> str:
 
 ### 3. Prototyper
 
-**Type**: LLM Agent  
+**Type**: LLM Agent
 **File**: `agent_graph/agents/prototyper.py`
 
 **Input:**
 - Function analysis (archetype, constraints)
 - Session memory (API constraints)
 - FuzzingContext (headers, dependencies)
+- **Knowledge extraction** (API semantics from documentation, driver patterns)
 
 **Output:**
 ```python
@@ -222,6 +223,8 @@ def _determine_next_action(state: FuzzingWorkflowState) -> str:
 - Uses archetype templates for initial structure
 - Applies API constraints from session memory
 - Generates both driver code and build script
+- **Uses documentation knowledge** (parameter constraints, ownership semantics) when available
+- **Uses driver patterns** (setup/teardown, code idioms) from existing OSS-Fuzz drivers
 
 ### 4. Fixer
 
@@ -251,6 +254,7 @@ def _determine_next_action(state: FuzzingWorkflowState) -> str:
 - Context-aware: only sees relevant error context
 - Checks session memory for known fixes
 - Stores new successful fixes in session memory
+- **Uses knowledge extraction** (header configs, boundary checks from existing drivers) for targeted fixes
 
 ### 5. Crash Analyzer
 
@@ -668,5 +672,6 @@ print(f"Final phase: {result['workflow_phase']}")
 - **Prompts**: see `prompts/` for all LLM system prompts.
 - **Experiment infrastructure**: see `experiment/`.
 - **New project setup**: see `docs/NEW_PROJECT_SETUP.md`.
+- **Knowledge extraction setup**: see `docs/KNOWLEDGE_SETUP.md` for documentation and driver pattern configuration.
 - **How to run LogicFuzz**: see `docs/RUNNING.md` and the top‑level `README.md`.
 

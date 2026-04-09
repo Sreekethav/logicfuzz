@@ -164,6 +164,24 @@ Qwen variants you can use:
 - `qwen-max`: highest quality.
 - `qwen3`: balanced default.
 
+## 📚 Knowledge Extraction (RAG)
+
+LogicFuzz can extract knowledge from documentation and existing fuzz drivers to improve generation quality:
+
+- **Documentation**: API docs, header files, README files
+- **Existing drivers**: Patterns from OSS-Fuzz drivers (headers, boundary checks)
+
+To enable, add `document_paths` to your benchmark YAML:
+
+```yaml
+"project": "my-project"
+"document_paths":
+  - "/src/my-project/include/api.h"
+  - "/src/my-project/README.md"
+```
+
+For detailed configuration, see [`docs/KNOWLEDGE_SETUP.md`](KNOWLEDGE_SETUP.md).
+
 ## 🐛 Troubleshooting (quick checklist)
 
 - **Compilation fails repeatedly**

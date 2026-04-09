@@ -85,7 +85,8 @@ python run_logicfuzz.py --list-models
 |-------|-------------|
 | **`docs/RUNNING.md`** | How to run LogicFuzz (CLI flags, Docker usage, troubleshooting). |
 | **`docs/NEW_PROJECT_SETUP.md`** | How to onboard new projects (OSS‑Fuzz, private repos, custom builds). |
-| **`docs/WORKFLOW_DIAGRAM.md`** | High‑level workflow and architecture diagrams. |
+| **`docs/KNOWLEDGE_SETUP.md`** | How to configure documentation paths and knowledge extraction (RAG). |
+| **`docs/DOCKER_SETUP.md`** | Docker environment quickstart and data-dir workflow. |
 | **`agent_graph/README.md`** | Implementation details of the LangGraph‑based agent workflow. |
 
 
