@@ -1,0 +1,323 @@
+"""
+Benchmark class that contains the project-under-test information.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from enum import Enum
+from typing import Any, List, Optional
+
+import yaml
+
+class FileType(Enum):
+  """File types of target files."""
+  C = 'C'
+  CPP = 'C++'
+  JAVA = 'Java'
+  NONE = ''
+
+# Define a custom representer for quoting strings
+def quoted_string_presenter(dumper, data):
+  if '\n' in data:
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+  return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='"')
+
+class Benchmark:
+  """Represents a benchmark."""
+
+  @classmethod
+  def to_yaml(cls,
+              benchmarks: list[Benchmark],
+              outdir: str = './',
+              out_basename: str = ''):
+    """Converts and saves selected fields of a benchmark to a YAML file."""
+    # Register the custom representer
+    yaml.add_representer(str, quoted_string_presenter)
+    result: dict[str, Any] = {
+        'project': benchmarks[0].project,
+        'language': benchmarks[0].language,
+        'target_path': benchmarks[0].target_path,
+        'target_name': benchmarks[0].target_name,
+    }
+    for benchmark in benchmarks:
+      if benchmark.is_project_level:
+        # Project-level benchmark: no functions or test_files needed
+        continue
+      elif benchmark.test_file_path:
+        if 'test_files' not in result:
+          result['test_files'] = []
+        result['test_files'].append(
+            {'test_file_path': benchmark.test_file_path})
+      else:
+        if 'functions' not in result:
+          result['functions'] = []
+        result['functions'].append({
+            'signature': benchmark.function_signature,
+            'name': benchmark.function_name,
+            'return_type': benchmark.return_type,
+            'params': benchmark.params
+        })
+
+    if not out_basename:
+      out_basename = f'{benchmarks[0].project}.yaml'
+    with open(os.path.join(outdir, out_basename), 'w') as file:
+      yaml.dump(result, file, default_flow_style=False, width=sys.maxsize)
+
+  @classmethod
+  def from_yaml(cls, benchmark_path: str) -> List:
+    """Constructs a benchmark based on a yaml file."""
+    benchmarks = []
+    with open(benchmark_path, 'r') as benchmark_file:
+      data = yaml.safe_load(benchmark_file)
+    if not data:
+      return []
+
+    project_name = data.get('project', '')
+    use_context = data.get('use_context', False)
+    use_project_examples = data.get('use_project_examples', True)
+    cppify_headers = data.get('cppify_headers', False)
+    commit = data.get('commit')
+    functions = data.get('functions', [])
+    document_paths = data.get('document_paths', [])  # Documentation paths for RAG
+
+    test_files = data.get('test_files', [])
+
+    # Support project-level mode: no functions and no test_files specified
+    # In this mode, APIs are extracted automatically from the project
+    if not functions and not test_files:
+      max_len = os.pathconf('/', 'PC_NAME_MAX') - len('output-')
+      truncated_id = f'{project_name}-project'[:max_len]
+      benchmarks.append(
+          cls(
+              truncated_id.lower(),
+              data['project'],
+              data['language'],
+              '',  # function_signature
+              '',  # function_name
+              '',  # return_type
+              [],  # params
+              data.get('target_path', ''),
+              data.get('target_name', ''),
+              use_project_examples=use_project_examples,
+              cppify_headers=cppify_headers,
+              commit=commit,
+              use_context=use_context,
+              document_paths=document_paths,
+          ))
+      return benchmarks
+
+    if test_files:
+      for test_file in test_files:
+        max_len = os.pathconf('/', 'PC_NAME_MAX') - len('output-')
+        test_file_path = test_file.get('test_file_path')
+        normalized_test_path = test_file_path.replace('/', '_').replace(
+            '.', '_').replace('-', '_')
+        truncated_id = f'{project_name}-{normalized_test_path}'[:max_len]
+
+        benchmarks.append(
+            cls(
+                truncated_id.lower(),
+                data['project'],
+                data['language'],
+                '',
+                '',
+                '',
+                [],
+                data['target_path'],
+                data.get('target_name', ''),
+                test_file_path=test_file_path,
+                document_paths=document_paths,
+            ))
+
+    if functions:
+      # function type benchmark
+      for function in functions:
+        # Long raw_function_names (particularly for c++ projects) may exceed
+        # filesystem limits on file path/name length when creating WorkDir.
+        max_len = os.pathconf('/', 'PC_NAME_MAX') - len('output-')
+        # Docker tag name cannot exceed 127 characters, and will be suffixed by
+        # '<sample-id>-experiment'.
+        docker_name_len = 127 - len('-03-experiment')
+        max_len = min(max_len, docker_name_len)
+        truncated_id = f'{project_name}-{function.get("name")}'[:max_len]
+        benchmarks.append(
+            cls(truncated_id.lower(),
+                data['project'],
+                data['language'],
+                function.get('signature'),
+                function.get('name'),
+                function.get('return_type'),
+                function.get('params'),
+                data['target_path'],
+                data.get('target_name'),
+                use_project_examples=use_project_examples,
+                cppify_headers=cppify_headers,
+                commit=commit,
+                use_context=use_context,
+                function_dict=function,
+                document_paths=document_paths))
+
+    return benchmarks
+
+  def __init__(self,
+               benchmark_id: str,
+               project: str,
+               language: str,
+               function_signature: str,
+               function_name: str,
+               return_type: str,
+               params: list[dict[str, str]],
+               target_path: str,
+               preferred_target_name: Optional[str] = None,
+               use_project_examples=True,
+               cppify_headers=False,
+               use_context=False,
+               commit=None,
+               function_dict: Optional[dict] = None,
+               test_file_path: str = '',
+               document_paths: Optional[List[str]] = None):
+    self.id = benchmark_id
+    self.project = project
+    self.language = language
+    self.function_signature = function_signature
+    self.function_name = function_name
+    self.return_type = return_type
+    self.params = params
+    self.function_dict = function_dict
+    self.target_path = target_path
+    self._preferred_target_name = preferred_target_name
+    self.use_project_examples = use_project_examples
+    self.use_context = use_context
+    self.cppify_headers = cppify_headers
+    self.commit = commit
+    self.test_file_path = test_file_path
+    self.document_paths = document_paths or []  # Documentation paths for RAG retrieval
+    # Note: Only C/C++ projects are supported
+
+  def __repr__(self):
+    return (f'Benchmark<id={self.id}, project={self.project}, '
+            f'language={self.language}, '
+            f'function_signature={self.function_signature}, '
+            f'function_name={self.function_name}, '
+            f'return_type={self.return_type}, '
+            f'params={self.params}, '
+            f'target_name={self.target_name}, '
+            f'use_context={self.use_context}>')
+
+  @property
+  def target_name(self):
+    """Returns target_name if it is defined,
+        otherwise use the basename of the target path."""
+    return (self._preferred_target_name or
+            os.path.splitext(os.path.basename(self.target_path))[0])
+
+  @property
+  def file_type(self) -> FileType:
+    """Returns the file type of the benchmark."""
+    return get_file_type(self.target_path)
+
+  @property
+  def is_c_target(self) -> bool:
+    """Validates if the project is written in C."""
+    return self.file_type.value.lower() == 'c'
+
+  @property
+  def is_cpp_target(self) -> bool:
+    """Validates if the project is written in C++."""
+    return self.file_type.value.lower() == 'c++'
+
+  @property
+  def is_java_target(self) -> bool:
+    """Validates if the project is written in Java."""
+    return self.file_type.value.lower() == 'java'
+
+  @property
+  def is_c_project(self) -> bool:
+    """Validates if the project is written in C."""
+    return self.language.lower() == 'c'
+
+  @property
+  def is_cpp_project(self) -> bool:
+    """Validates if the project is written in C++."""
+    return self.language.lower() == 'c++'
+
+  @property
+  def is_project_level(self) -> bool:
+    """Checks if this is a project-level benchmark (no specific function target).
+
+    Project-level benchmarks use automatic API extraction from the project
+    instead of requiring explicit function specifications in YAML.
+    """
+    return not self.function_signature and not self.function_name and not self.test_file_path
+
+  def to_dict(self) -> dict:
+    """Convert benchmark to a dictionary for serialization."""
+    return {
+        'id': self.id,
+        'project': self.project,
+        'language': self.language,
+        'function_signature': self.function_signature,
+        'function_name': self.function_name,
+        'return_type': self.return_type,
+        'params': self.params,
+        'target_path': self.target_path,
+        '_preferred_target_name': self._preferred_target_name,
+        'use_project_examples': self.use_project_examples,
+        'use_context': self.use_context,
+        'cppify_headers': self.cppify_headers,
+        'commit': self.commit,
+        'test_file_path': self.test_file_path,
+        'function_dict': self.function_dict,
+        'document_paths': self.document_paths,
+    }
+  
+  @classmethod
+  def from_dict(cls, data: dict) -> 'Benchmark':
+    """Create benchmark from a dictionary."""
+    return cls(
+        benchmark_id=data['id'],
+        project=data['project'],
+        language=data['language'],
+        function_signature=data['function_signature'],
+        function_name=data['function_name'],
+        return_type=data['return_type'],
+        params=data['params'],
+        target_path=data['target_path'],
+        preferred_target_name=data.get('_preferred_target_name'),
+        use_project_examples=data.get('use_project_examples', True),
+        cppify_headers=data.get('cppify_headers', False),
+        use_context=data.get('use_context', False),
+        commit=data.get('commit'),
+        function_dict=data.get('function_dict'),
+        test_file_path=data.get('test_file_path', ''),
+        document_paths=data.get('document_paths', []),
+    )
+
+  @property
+  def needs_extern(self) -> bool:
+    """Checks if it is C++ fuzz target for a C project, which needs `extern`."""
+    return self.is_cpp_target and self.is_c_project
+
+def get_file_type(file_path: str) -> FileType:
+  """Returns the file type based on the extension of |file_name|."""
+  if file_path.endswith('.c'):
+    return FileType.C
+  cpp_extensions = ['.cc', '.cpp', '.cxx', '.c++', '.h', '.hpp']
+  if any(file_path.endswith(ext) for ext in cpp_extensions):
+    return FileType.CPP
+  if file_path.endswith('.java'):
+    return FileType.JAVA
+  return FileType.NONE
+
+def is_c_file(file_path: str) -> bool:
+  """Validates if |file_path| is a C file by its extension."""
+  return get_file_type(file_path) == FileType.C
+
+def is_cpp_file(file_path: str) -> bool:
+  """Validates if |file_path| is a C++ file by its extension."""
+  return get_file_type(file_path) == FileType.CPP
+
+def is_java_file(file_path: str) -> bool:
+  """Validates if |file_path| is a Java file by its extension."""
+  return get_file_type(file_path) == FileType.JAVA

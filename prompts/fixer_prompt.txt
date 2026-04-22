@@ -1,0 +1,69 @@
+<task>
+Fix compilation for project: {PROJECT_NAME}
+</task>
+
+<current_code>
+{CURRENT_CODE}
+</current_code>
+
+<errors>
+{BUILD_ERRORS}
+</errors>
+
+<context>
+{ADDITIONAL_CONTEXT}
+</context>
+
+<debug_process>
+1. Read error → identify error type
+2. Check headers → internal paths? conflicts?
+3. Apply minimal fix
+4. Verify API sequence still intact
+</debug_process>
+
+<error_patterns>
+
+<headers>
+Check first:
+- "No such file" → Check case-sensitive paths
+- "internal/*" paths → Remove, use public API only
+- C API conflicts → Keep *_c.h, remove *.h
+- "typedef redefinition" → Header conflict, keep only one
+</headers>
+
+<linker_errors>
+- "undefined reference" → Add #include "impl.cpp" (not forward declare)
+- Check existing fuzzers: grep '#include.*\.cpp' for pattern
+- If no .cpp pattern exists → Report UNABLE_TO_FIX
+</linker_errors>
+
+<api_call_errors>
+- Type mismatch → Fix signatures/casts
+- Const violations → Add/remove const qualifiers
+- Wrong parameters → Check API documentation
+</api_call_errors>
+
+<types_api>
+- Deprecated APIs → Update to current API
+- Uninitialized variables → Initialize before use
+- Missing includes → Add required headers
+</types_api>
+
+</error_patterns>
+
+<special_cases>
+- If API doesn't exist: UNABLE_TO_FIX: API does not exist
+- If linker error but no .cpp available: Check existing fuzzers for pattern, or UNABLE_TO_FIX
+</special_cases>
+
+<output_format>
+First provide a brief conclusion (max 3 sentences): errors found, root causes, fixes applied.
+
+Then output your complete fixed code inside <fuzz_target> tags.
+
+If build script needs modification, output it inside <build_script> tags.
+
+CRITICAL:
+- Include complete, compilable code - NO placeholders like "// ... unchanged ..."
+- Only ONE code block containing the complete fuzz target
+</output_format>

@@ -1,0 +1,29 @@
+# Test project - Function-level configuration
+# One benchmark trial is created per function entry.
+# The LLM generates a driver focused on that specific function's signature.
+
+"project": "test"
+"language": "c"
+"target_path": "/src/test-project/fuzzer.c"
+"target_name": "test_project_fuzzer"
+
+"functions":
+  - name: "parse_int_list"
+    signature: "int parse_int_list(const char* s, size_t n)"
+    return_type: "int"
+    params:
+      - name: "s"
+        type: "const char *"
+      - name: "n"
+        type: "size_t"
+
+  - name: "compute_average"
+    signature: "int compute_average(const int* values, size_t count, double* out_avg)"
+    return_type: "int"
+    params:
+      - name: "values"
+        type: "const int *"
+      - name: "count"
+        type: "size_t"
+      - name: "out_avg"
+        type: "double *"

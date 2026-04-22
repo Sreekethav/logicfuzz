@@ -1,0 +1,100 @@
+<task>
+Analyze the following fuzz target to determine why it has low coverage and how to improve it.
+</task>
+
+<project_info>
+Project: {PROJECT}
+Language: {LANGUAGE}
+</project_info>
+
+<current_fuzz_target>
+```
+{FUZZ_TARGET}
+```
+</current_fuzz_target>
+
+<fuzzing_log>
+{FUZZING_LOG}
+</fuzzing_log>
+
+<api_sequence_info>
+{FUNCTION_REQUIREMENTS}
+</api_sequence_info>
+
+<additional_context>
+{ADDITIONAL_CONTEXT}
+</additional_context>
+
+<analysis_steps>
+
+<step1>
+Examine Current Coverage:
+- Review the fuzzing log to understand current coverage levels
+- Identify which code blocks or APIs are NOT being executed
+- Determine which branches are always taking the same path
+</step1>
+
+<step2>
+Analyze the Fuzz Target:
+- How are parameters extracted from fuzzer input?
+- What values are used (constants, naive values, processed input)?
+- Is the approach too narrow (single code path)?
+- Are all APIs in the sequence being called?
+</step2>
+
+<step3>
+Identify Coverage Gaps:
+- Which API calls are never reached?
+- Which conditionals or branches are never taken?
+- What edge cases are not being tested?
+- Which error paths are never executed?
+</step3>
+
+<step4>
+Determine Root Causes:
+- Why does the fuzz target exercise only one narrow code path?
+- Is input too naive or unprocessed?
+- Are there missing setup/initialization calls?
+- Is parameter variation insufficient?
+</step4>
+
+<step5>
+Develop Improvement Solutions:
+- Fine-grained Input Preprocessing: Split raw input into multiple meaningful parameters
+- Test Edge Cases: Empty inputs, very short/long inputs, boundary values
+- Vary API Parameters: Extract varied values from fuzz input (use language-appropriate methods)
+- Try Different Sequences: If current sequence saturated, try different API sequence
+</step5>
+
+</analysis_steps>
+
+<output_format>
+Provide your analysis using these XML tags:
+
+<conclusion>True or False</conclusion>
+
+<insights>
+Coverage Assessment: [Current coverage level and what's missing]
+
+Root Cause Analysis: [Why the fuzz target achieves low coverage, with specific evidence]
+- Fixed Parameters: Using constants instead of fuzzed values
+- Lack of Input Variation: Input used verbatim without preprocessing
+- Missing API Calls: Not all APIs in sequence are being called
+- Missing Edge Cases: No testing of boundary conditions
+</insights>
+
+<suggestions>
+Improvement Recommendations with specific code examples:
+
+1. Vary All Parameters: Extract different values from fuzz input instead of using constants
+2. Call All APIs in Sequence: Don't skip any API in the validated sequence
+3. Test Edge Cases: Empty, minimal, and boundary inputs
+</suggestions>
+</output_format>
+
+<requirements>
+- Use <conclusion>True</conclusion> if improvement is needed, <conclusion>False</conclusion> otherwise
+- Keep <insights> concise (2-3 key findings max)
+- Include code examples in suggestions
+- No extra commentary outside XML tags
+</requirements>

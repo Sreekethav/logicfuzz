@@ -1,0 +1,10 @@
+# curl - Project-level configuration
+# Uses automatic API extraction - no function specification required
+
+"project": "curl"
+"language": "c++"
+"target_path": "/src/curl_fuzzer/fuzz_url.cc"
+"target_name": "fuzz_url"
+
+# Note: No 'functions' section needed in project-level mode
+# APIs will be automatically extracted from the project via Clang/LLVM

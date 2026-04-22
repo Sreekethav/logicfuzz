@@ -1,0 +1,10 @@
+# conti_test - Project-level configuration
+# Uses automatic API extraction - no function specification required
+
+"project": "conti_test"
+"language": "c"
+"target_path": "/src/conti_test/fuzzer.c"
+"target_name": "conti_test_fuzzer"
+
+# Note: No 'functions' section needed in project-level mode
+# APIs will be automatically extracted from the project via Clang/LLVM

@@ -1,0 +1,123 @@
+<task>
+Improve fuzz driver coverage for project: {PROJECT_NAME}
+</task>
+
+<current_status>
+
+<coverage_metrics>
+- PC Coverage: {COVERAGE_PERCENT}
+- Line Coverage Diff: {LINE_COVERAGE_DIFF}
+</coverage_metrics>
+
+<current_driver>
+{CURRENT_CODE}
+</current_driver>
+
+Coverage too low! Rewrite needed.
+
+</current_status>
+
+<diagnosis>
+
+<root_cause>
+{COVERAGE_INSIGHTS}
+</root_cause>
+
+<recommended_actions>
+{IMPROVEMENT_SUGGESTIONS}
+</recommended_actions>
+
+</diagnosis>
+
+<instructions>
+Rewrite the driver in current_driver to maximize coverage by addressing the diagnosis above.
+
+<requirements>
+1. Implement coverage analyzer's recommended actions
+2. Use FuzzedDataProvider for all variable inputs
+3. Replace fixed/constant parameters with varied inputs
+4. Test edge cases (NULL, empty, boundary values)
+5. Maintain correct API sequence order
+6. Don't violate API lifecycle constraints
+</requirements>
+
+<improvement_strategies>
+
+<vary_parameters>
+```cpp
+#include <fuzzer/FuzzedDataProvider.h>
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+  FuzzedDataProvider fdp(data, size);
+
+  // Vary ALL inputs, not just the first one
+  std::string input1 = fdp.ConsumeRandomLengthString(1024);
+  std::string input2 = fdp.ConsumeRandomLengthString(512);
+  int flags = fdp.ConsumeIntegral<int>();
+
+  // Call API sequence with varied inputs
+  ctx = api_create();
+  api_configure(ctx, input1.data(), input1.size());
+  api_process(ctx, input2.data(), input2.size(), flags);
+  api_cleanup(ctx);
+  return 0;
+}
+```
+</vary_parameters>
+
+<test_edge_cases>
+```cpp
+// Test empty, short, and boundary inputs
+if (size == 0) return 0;  // Handle empty input gracefully
+// Test with minimal input
+// Test with maximum reasonable input
+```
+</test_edge_cases>
+
+<vary_struct_fields>
+```cpp
+FuzzedDataProvider fdp(data, size);
+struct Config cfg = {0};
+cfg.field1 = fdp.ConsumeIntegral<int>();
+cfg.field2 = fdp.ConsumeIntegralInRange<uint32_t>(0, 100);
+api_init(ctx, &cfg);
+```
+</vary_struct_fields>
+
+</improvement_strategies>
+
+<override_authority>
+- Change FIXED -> varied when coverage low
+- Document rationale when overriding
+</override_authority>
+
+<common_issues>
+- Fixed params -> Use FuzzedDataProvider
+- Single sequence -> Try different sequences
+- No edge cases -> Test NULL/empty/boundary
+- Missing API calls -> Add more APIs from the same sequence
+</common_issues>
+
+</instructions>
+
+<output_format>
+Provide your response using these tags:
+
+<conclusion>
+[Root cause, changes made, expected improvement - max 3 sentences]
+</conclusion>
+
+<fuzz_target>
+[Complete improved C++ code - NO placeholders]
+</fuzz_target>
+
+<coverage_strategy>
+[New paths targeted, why better coverage expected - max 3 sentences]
+</coverage_strategy>
+</output_format>
+
+<requirements>
+- Keep conclusion and strategy brief (max 3 sentences each)
+- Include complete, compilable code - NO placeholders
+- Only ONE code block containing the complete fuzz target
+- NO extra commentary outside the specified tags
+</requirements>

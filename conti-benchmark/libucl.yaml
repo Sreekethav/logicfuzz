@@ -1,0 +1,17 @@
+# libucl - Project-level configuration with RAG documentation support
+# Uses automatic API extraction + documentation knowledge for enhanced driver generation
+
+"project": "libucl"
+"language": "c"
+"target_path": "/src/libucl/ucl_fuzzer.c"
+"target_name": "ucl_fuzzer"
+
+# Document paths for RAG retrieval (PromeFuzz-style)
+# These will be indexed into ChromaDB and used for LLM-enhanced context
+"document_paths":
+  - "/src/libucl/doc/api.md"      # Comprehensive API documentation
+  - "/src/libucl/include/ucl.h"   # Header with function signatures and Doxygen comments
+  - "/src/libucl/README.md"       # Project overview and usage examples
+
+# Note: No 'functions' section needed in project-level mode
+# APIs will be automatically extracted from the project via Clang/LLVM

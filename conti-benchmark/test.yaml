@@ -1,0 +1,11 @@
+# Test project - Project-level configuration
+# Uses automatic API extraction via Clang/LLVM - no function specification required
+# No documentation or reference driver provided; context is purely from API extraction
+
+"project": "test"
+"language": "c"
+"target_path": "/src/test-project/fuzzer.c"
+"target_name": "test_project_fuzzer"
+
+# Note: No 'document_paths' - no documentation available for this project
+# Note: No 'functions' section - project-level mode, APIs extracted automatically
