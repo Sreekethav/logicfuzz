@@ -14,10 +14,32 @@ import time
 import traceback
 from abc import abstractmethod
 from typing import Any, Callable, Optional, Type
+
+import httpx
 import openai
 import tiktoken
 
 logger = logging.getLogger(__name__)
+
+
+def _get_system_ca_bundle_path() -> str:
+  """Resolve CA bundle path, preferring explicit LogicFuzz/system paths."""
+  explicit = (os.getenv('LOGICFUZZ_CA_BUNDLE') or os.getenv('VIO_CA_BUNDLE')
+              or os.getenv('DEEPSEEK_CA_BUNDLE') or os.getenv('OPENAI_CA_BUNDLE')
+              or '')
+  if explicit:
+    return explicit
+  for candidate in ('/usr/lib/ssl/cert.pem', '/etc/ssl/certs/ca-certificates.crt'):
+    if os.path.exists(candidate):
+      return candidate
+  return ''
+
+
+def _create_openai_http_client() -> httpx.Client:
+  """Create a shared HTTP client that uses system certificates."""
+  ca_bundle = _get_system_ca_bundle_path()
+  verify = ca_bundle if ca_bundle else True
+  return httpx.Client(verify=verify, trust_env=True)
 
 # Model hyper-parameters.
 MAX_TOKENS: int = 2000
@@ -367,7 +389,8 @@ class GPT(LLM):
 
   def _get_client(self):
     """Returns the OpenAI client."""
-    return openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+    return openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'),
+                         http_client=_create_openai_http_client())
 
   # ================================ Prompt ================================ #
   def estimate_token_num(self, text) -> int:
@@ -603,7 +626,8 @@ class DeepSeek(GPT):
     """Returns the DeepSeek client using OpenAI API format."""
     return openai.OpenAI(
         api_key=os.getenv('DEEPSEEK_API_KEY'),
-        base_url="https://api.deepseek.com"
+        base_url="https://api.deepseek.com",
+        http_client=_create_openai_http_client()
     )
 
 class DeepSeekChat(DeepSeek):
@@ -637,7 +661,9 @@ class Qwen(GPT):
         'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'  # Singapore region
     )
     
-    return openai.OpenAI(api_key=api_key, base_url=base_url)
+    return openai.OpenAI(api_key=api_key,
+               base_url=base_url,
+               http_client=_create_openai_http_client())
 
 class QwenCoder(Qwen):
   """Qwen Turbo model."""

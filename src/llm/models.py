@@ -42,12 +42,19 @@ def _create_deepseek_model(model_name: str = "deepseek-chat",
                            max_tokens: int = MAX_TOKENS,
                            **kwargs) -> BaseChatModel:
     """Create a DeepSeek chat model (OpenAI-compatible API)."""
+    import httpx
     from langchain_openai import ChatOpenAI
+
+    # Prefer system CA store so corporate/intermediate CAs are honored.
+    ca_bundle = _get_system_ca_bundle_path()
+    verify = ca_bundle if ca_bundle else True
+    http_client = httpx.Client(verify=verify, trust_env=True)
     return ChatOpenAI(model=model_name,
                       base_url="https://api.deepseek.com",
                       api_key=os.getenv("DEEPSEEK_API_KEY"),
                       temperature=temperature,
                       max_tokens=max_tokens,
+                      http_client=http_client,
                       **kwargs)
 
 
@@ -87,10 +94,11 @@ def _normalize_openai_base_url(base_url: str) -> str:
     return normalized
 
 
-def _get_vio_ca_bundle_path() -> str:
-    """Resolve corporate CA bundle — prefers system bundle over certifi."""
-    explicit = (os.getenv("VIO_CA_BUNDLE") or os.getenv("REQUESTS_CA_BUNDLE")
-                or os.getenv("SSL_CERT_FILE") or "")
+def _get_system_ca_bundle_path() -> str:
+    """Resolve CA bundle path, preferring explicit LogicFuzz/system paths."""
+    explicit = (os.getenv("LOGICFUZZ_CA_BUNDLE") or os.getenv("VIO_CA_BUNDLE")
+                or os.getenv("DEEPSEEK_CA_BUNDLE") or os.getenv("OPENAI_CA_BUNDLE")
+                or "")
     if explicit:
         return explicit
     for candidate in ("/usr/lib/ssl/cert.pem",
@@ -110,7 +118,7 @@ def _create_vio_model(model_name: str,
 
     base_url = os.getenv("VIO_BASE_URL", "")
     api_key = os.getenv("VIO_API_KEY") or os.getenv("API_KEY")
-    ca_bundle = _get_vio_ca_bundle_path()
+    ca_bundle = _get_system_ca_bundle_path()
     verify = ca_bundle if ca_bundle else True
     http_client = httpx.Client(verify=verify, trust_env=True)
     return ChatOpenAI(model=model_name,

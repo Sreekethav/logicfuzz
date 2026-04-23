@@ -11,7 +11,6 @@ import xml.etree.ElementTree as ET
 from typing import BinaryIO, List, Optional
 
 import chardet
-import rust_demangler
 
 logger = logging.getLogger(__name__)
 
