@@ -1,5 +1,0 @@
-[build_requires]
-compbuild/[~0.1]@conti_gen_dev1/stable
-
-[generators]
-virtualenv
